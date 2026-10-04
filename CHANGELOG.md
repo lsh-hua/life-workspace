@@ -18,6 +18,7 @@
 
 ### 发布
 - 已生成 Windows x64 NSIS 安装器 `人生工作台 Setup 1.2.0.exe`
+- 源码已纳入 Git，并发布到 GitHub 仓库 `lsh-hua/life-workspace`
 
 ## [1.1.0] - 2026-09-14
 

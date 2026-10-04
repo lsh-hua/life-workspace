@@ -146,12 +146,12 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
   - 修复/小调整 → 修订号 +1
 - 每次发版：更新两处 version → 在 CHANGELOG.md 记录 → 重新打 exe（产物文件名自动带版本号）。
 - 历史：0.1.0 首个桌面版；0.2.0 集合版开工 + 开机自启；1.0.0 首个稳定交接版；1.1.0 课程表与三栏复盘；**1.2.0 课程提醒与番茄钟联动**。
+- 源码仓库：`https://github.com/lsh-hua/life-workspace`，默认分支 `main`。
 
 ## 10. 日后规划（候选方向，按用户意愿排序）
 
 1. 数据备份/导出（JSON 全量导出）
 2. 应用自定义图标（当前 exe 用 Electron 默认图标）
-3. 考虑引入 git 做源码版本控制（当前项目无 git，版本仅靠 package.json + CHANGELOG）
 
 ---
 

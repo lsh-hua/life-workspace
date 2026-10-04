@@ -54,3 +54,4 @@ Electron   -> Next standalone       -> SQLite 用户目录
 
 - 2026-10-04：新增课程解析领域模块与测试；番茄钟接入下一堂课和课前通知；数据表保持不变。
 - 2026-10-04：修复 standalone 误打包本地数据库的问题；构建脚本新增用户数据泄露断言。
+- 2026-10-04：初始化 Git 仓库并推送至 `lsh-hua/life-workspace`；默认分支为 `main`。
