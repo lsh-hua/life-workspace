@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { api } from "@/lib/api";
 import type { Habit, HabitLog, Review, Task } from "@/db/schema";
 import { todayStr } from "@/lib/dates";
+import { reviewStreak } from "@/lib/day-rules";
+import {
+  createReviewAutosave, EMPTY_REVIEW, parseReviewDraft, sameReview,
+  type ReviewAutosave, type ReviewForm, type ReviewSaveSnapshot,
+} from "@/lib/review-autosave";
 import { addDays, format, getDay, parseISO } from "date-fns";
-import { Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, Flame } from "lucide-react";
+import { AlertCircle, Check, CheckCircle2, ChevronLeft, ChevronRight, Copy, Flame, RotateCcw } from "lucide-react";
 
 const MOODS = ["😞", "😕", "😐", "🙂", "😄"];
 const MOOD_LABEL = ["", "很低落", "不太好", "一般", "不错", "很棒"];
@@ -47,71 +52,123 @@ export default function ReviewPage() {
 }
 
 // ================= 日复盘 =================
-function DayReview() {
-  const today = todayStr();
-  const [form, setForm] = useState({
-    doneText: "",
-    problemText: "",
-    tomorrowText: "",
-    mood: 0,
-    summary: "",
+const reviewSessions = new Map<string, { autosave: ReviewAutosave; notice: string | null }>();
+const loadingSnapshot: ReviewSaveSnapshot = {
+  form: EMPTY_REVIEW, savedForm: EMPTY_REVIEW, status: "idle", conflict: false,
+  hasPending: false, hasSaved: false, error: null, draftError: null,
+};
+const subscribeNothing = () => () => {};
+const getLoadingSnapshot = () => loadingSnapshot;
+
+function toReviewForm(review: Review | null): ReviewForm {
+  return {
+    doneText: review?.doneText ?? "", problemText: review?.problemText ?? "",
+    tomorrowText: review?.tomorrowText ?? "", mood: review?.mood ?? 0, summary: review?.summary ?? "",
+  };
+}
+
+function getReviewSession(date: string, review: Review | null) {
+  const existing = reviewSessions.get(date);
+  if (existing && (existing.autosave.snapshot().hasPending || sameReview(existing.autosave.snapshot().savedForm, toReviewForm(review)))) return existing;
+  const key = `workbench:review-draft:${date}`;
+  let draft = null;
+  let notice = null;
+  try {
+    const raw = (window.workbench?.reviewDrafts ?? window.localStorage).getItem(key);
+    draft = parseReviewDraft(raw, date);
+    if (raw && !draft) notice = "本机草稿格式异常，原记录仍保留，请先核对已保存内容。";
+    else if (draft && !sameReview(draft.form, toReviewForm(review))) notice = "已恢复本机未保存的草稿。";
+  } catch {
+    notice = "无法读取本机草稿，请确认保存成功后再离开。";
+  }
+  const autosave = createReviewAutosave({
+    date, draft,
+    server: review ? { form: toReviewForm(review), updatedAt: review.updatedAt } : null,
+    save: (form) => api<Review>("/api/reviews", { method: "POST", json: { date, ...form, mood: form.mood || null } }),
+    writeDraft: (value) => (window.workbench?.reviewDrafts ?? window.localStorage).setItem(key, JSON.stringify(value)),
+    removeDraft: (form) => {
+      const storage = window.workbench?.reviewDrafts ?? window.localStorage;
+      const current = parseReviewDraft(storage.getItem(key), date);
+      if (current && sameReview(current.form, form)) storage.removeItem(key);
+    },
   });
+  const session = { autosave, notice };
+  reviewSessions.set(date, session);
+  return session;
+}
+
+function DayReview() {
+  const [today] = useState(todayStr);
+  const [session, setSession] = useState<ReviewAutosave | null>(null);
   const [history, setHistory] = useState<Review[]>([]);
   const [doneTasks, setDoneTasks] = useState<Task[]>([]);
-  const [saved, setSaved] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const load = useCallback(async () => {
-    const [review, list, tasks] = await Promise.all([
-      api<Review | null>(`/api/reviews?date=${today}`),
-      api<Review[]>("/api/reviews"),
-      api<Task[]>("/api/tasks?filter=today"),
-    ]);
-    if (review) {
-      setForm({
-        doneText: review.doneText ?? "",
-        problemText: review.problemText ?? "",
-        tomorrowText: review.tomorrowText ?? "",
-        mood: review.mood ?? 0,
-        summary: review.summary ?? "",
-      });
-    }
-    setHistory(list.filter((r) => r.date !== today));
-    setDoneTasks(tasks.filter((t) => t.status === "done"));
-  }, [today]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const state = useSyncExternalStore(
+    session?.subscribe ?? subscribeNothing,
+    session?.snapshot ?? getLoadingSnapshot,
+    getLoadingSnapshot,
+  );
+  const form = state.form;
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let active = true;
+    Promise.all([
+      api<Review | null>(`/api/reviews?date=${today}`),
+      api<Review[]>("/api/reviews").catch(() => []),
+      api<Task[]>("/api/tasks?filter=today").catch(() => []),
+    ])
+      .then(([review, list, tasks]) => {
+        if (!active) return;
+        const loaded = getReviewSession(today, review);
+        setSession(loaded.autosave);
+        setNotice(loaded.notice);
+        setHistory(list.filter((item) => item.date !== today));
+        setDoneTasks(tasks.filter((task) => task.status === "done"));
+        setLoadError(null);
+      })
+      .catch(() => {
+        if (active) setLoadError("复盘读取失败，本机草稿会保留。请重新加载后继续编辑。");
+      });
+    return () => { active = false; };
+  }, [today, reload]);
 
-  const save = useCallback(
-    async (next: typeof form) => {
-      await api("/api/reviews", { method: "POST", json: { date: today, ...next, mood: next.mood || null } });
-      setSaved(true);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setSaved(false), 1500);
-    },
-    [today]
-  );
+  useEffect(() => {
+    if (!session || state.status !== "pending" || state.conflict) return;
+    const timer = window.setTimeout(() => { void session.flush(); }, 800);
+    return () => window.clearTimeout(timer);
+  }, [session, state.form, state.status, state.conflict]);
 
-  const update = (patch: Partial<typeof form>) => {
-    const next = { ...form, ...patch };
-    setForm(next);
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => save(next), 800); // 防抖自动保存
+  useEffect(() => {
+    if (!session) return;
+    const flush = () => { void session.flush(); };
+    const onVisibility = () => { if (document.visibilityState === "hidden") flush(); };
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!session.snapshot().hasPending) return;
+      flush();
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("beforeunload", onBeforeUnload);
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+      flush();
+    };
+  }, [session]);
+
+  const update = (patch: Partial<ReviewForm>) => {
+    if (session) session.edit({ ...session.snapshot().form, ...patch });
   };
-
-  const streak = (() => {
-    const dates = new Set(history.map((r) => r.date));
-    let n = history.length > 0 || form.summary || form.doneText ? 1 : 0;
-    const c = new Date();
-    c.setDate(c.getDate() - 1);
-    while (dates.has(c.toISOString().slice(0, 10))) {
-      n++;
-      c.setDate(c.getDate() - 1);
-    }
-    return n;
-  })();
+  const savedToday = state.hasSaved;
+  const streak = reviewStreak([...history.map((review) => review.date), ...(savedToday ? [today] : [])], today);
+  const statusLabel = !session ? "正在加载，暂时无法编辑" : {
+    idle: "编辑后自动保存", pending: "待保存", saving: "保存中…", saved: "已保存", error: "保存失败",
+  }[state.status];
 
   const field = (
     label: string,
@@ -119,7 +176,7 @@ function DayReview() {
     placeholder: string
   ) => (
     <div className="card p-4">
-      <label className="mb-2 block text-xs font-medium text-muted">{label}</label>
+      <label htmlFor={`review-${key}`} className="mb-2 block text-xs font-medium text-muted">{label}</label>
       {key === "doneText" && doneTasks.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {doneTasks.map((t) => (
@@ -130,6 +187,7 @@ function DayReview() {
         </div>
       )}
       <textarea
+        id={`review-${key}`}
         value={form[key]}
         onChange={(e) => update({ [key]: e.target.value })}
         placeholder={placeholder}
@@ -141,16 +199,12 @@ function DayReview() {
 
   return (
     <>
-      <div className="mb-4 flex items-center justify-between">
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <p className="text-sm text-muted tnum">
           {today} ·{" "}
-          {saved ? (
-            <span className="inline-flex items-center gap-1 text-muted">
-              <CheckCircle2 size={13} /> 已自动保存
-            </span>
-          ) : (
-            "编辑后自动保存"
-          )}
+          <span id="review-save-status" role="status" aria-live="polite" className={`inline-flex items-center gap-1 ${state.status === "error" ? "text-danger" : "text-muted"}`}>
+            {state.status === "saved" && <CheckCircle2 size={13} />}{statusLabel}
+          </span>
         </p>
         {streak > 0 && (
           <span className="flex items-center gap-1 rounded-full bg-ink px-3 py-1 text-xs text-white">
@@ -159,7 +213,44 @@ function DayReview() {
         )}
       </div>
 
-      <div className="space-y-4">
+      {loadError && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-4 text-sm">
+          <AlertCircle size={16} className="shrink-0 text-danger" />
+          <span className="flex-1">{loadError}</span>
+          <button type="button" onClick={() => setReload((value) => value + 1)} className="btn-ghost"><RotateCcw size={13} />重新加载</button>
+        </div>
+      )}
+      {(notice || state.draftError) && (
+        <p role="status" className="mb-4 rounded-xl border border-line bg-surface px-4 py-3 text-xs leading-6 text-muted">{state.draftError ?? notice}</p>
+      )}
+      {state.conflict && (
+        <div role="alert" className="mb-4 rounded-xl border border-line bg-surface p-4 text-sm">
+          <p className="font-medium">本机草稿与已保存内容不同</p>
+          <p className="mt-1 text-xs leading-6 text-muted">下方显示本机草稿。已保存内容也有变化，请核对后选择，再继续编辑。</p>
+          <details className="mt-2 text-xs text-muted">
+            <summary className="cursor-pointer py-1">查看已保存内容</summary>
+            <div className="mt-2 space-y-2 whitespace-pre-wrap rounded-lg bg-bg p-3">
+              <p>完成：{state.savedForm.doneText || "未填写"}</p>
+              <p>问题：{state.savedForm.problemText || "未填写"}</p>
+              <p>明日：{state.savedForm.tomorrowText || "未填写"}</p>
+              <p>总结：{state.savedForm.summary || "未填写"}</p>
+              <p>心情：{MOOD_LABEL[state.savedForm.mood] || "未填写"}</p>
+            </div>
+          </details>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="button" onClick={() => session?.resolveConflict("draft")} className="btn-primary">保留草稿并保存</button>
+            <button type="button" onClick={() => session?.resolveConflict("server")} className="btn-ghost">使用已保存内容，放弃草稿</button>
+          </div>
+        </div>
+      )}
+      {state.error && (
+        <div role="alert" className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-4 text-sm">
+          <span className="flex-1 text-danger">{state.error}</span>
+          <button type="button" onClick={() => { void session?.flush(); }} className="btn-ghost"><RotateCcw size={13} />重新保存</button>
+        </div>
+      )}
+
+      <fieldset disabled={!session || !!loadError || state.conflict} aria-describedby="review-save-status" className="space-y-4 disabled:opacity-60">
         {field("今天完成了什么？", "doneText", "记录今天的进展与成果…")}
         {field("遇到什么问题 / 没完成什么？", "problemText", "阻碍、卡点、遗留…")}
         {field("明天最重要的 1-3 件事？", "tomorrowText", "给明天的自己留个指引…")}
@@ -170,6 +261,9 @@ function DayReview() {
             {MOODS.map((m, i) => (
               <button
                 key={i}
+                type="button"
+                aria-label={MOOD_LABEL[i + 1]}
+                aria-pressed={form.mood === i + 1}
                 onClick={() => update({ mood: i + 1 })}
                 className={`rounded-lg px-3 py-1.5 text-xl transition-transform ${
                   form.mood === i + 1 ? "scale-110 bg-bg ring-1 ring-ink" : "opacity-50 hover:opacity-100"
@@ -180,13 +274,14 @@ function DayReview() {
             ))}
           </div>
           <input
+            aria-label="一句话总结今天"
             value={form.summary}
             onChange={(e) => update({ summary: e.target.value })}
             placeholder="一句话总结今天…"
             className="mt-3 h-9 w-full rounded-lg border border-line bg-bg px-3 text-sm outline-none placeholder:text-faint"
           />
         </div>
-      </div>
+      </fieldset>
 
       {history.length > 0 && (
         <section className="mt-10">
@@ -234,17 +329,20 @@ const weekdayCn = (d: string) => "日一二三四五六"[getDay(parseISO(d))];
 
 function PeriodReview({ period }: { period: "week" | "month" }) {
   const [offset, setOffset] = useState(0);
-  const [data, setData] = useState<ReportData | null>(null);
+  const [report, setReport] = useState<{ key: string; data: ReportData | null; error: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
-
-  const load = useCallback(async () => {
-    setData(null);
-    setData(await api<ReportData>(`/api/report?period=${period}&offset=${offset}`));
-  }, [period, offset]);
+  const [reload, setReload] = useState(0);
+  const key = `${period}:${offset}`;
+  const data = report?.key === key ? report.data : null;
+  const error = report?.key === key ? report.error : null;
 
   useEffect(() => {
-    load();
-  }, [load]);
+    let active = true;
+    api<ReportData>(`/api/report?period=${period}&offset=${offset}`)
+      .then((data) => { if (active) setReport({ key, data, error: null }); })
+      .catch(() => { if (active) setReport({ key, data: null, error: "复盘统计加载失败，请重试。" }); });
+    return () => { active = false; };
+  }, [key, period, offset, reload]);
 
   const days = data
     ? (() => {
@@ -325,7 +423,10 @@ function PeriodReview({ period }: { period: "week" | "month" }) {
       </div>
 
       {!data ? (
-        <div className="py-12 text-center text-sm text-faint">加载中…</div>
+        <div role={error ? "alert" : "status"} className="py-12 text-center text-sm text-faint">
+          {error ?? "加载中…"}
+          {error && <button type="button" onClick={() => setReload((value) => value + 1)} className="btn-ghost ml-3">重新加载</button>}
+        </div>
       ) : (
         <>
           <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">

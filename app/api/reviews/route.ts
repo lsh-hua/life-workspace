@@ -17,9 +17,24 @@ export async function GET(req: NextRequest) {
 
 // POST /api/reviews  按 date upsert（每天一篇）
 export async function POST(req: NextRequest) {
-  const body = await req.json();
+  const body = await req.json().catch(() => null);
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    return NextResponse.json({ error: "复盘内容格式不正确" }, { status: 400 });
+  }
   const date = body.date;
-  if (!date) return NextResponse.json({ error: "date required" }, { status: 400 });
+  const parsedDate = typeof date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? new Date(`${date}T00:00:00.000Z`) : null;
+  if (!parsedDate || !Number.isFinite(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== date) {
+    return NextResponse.json({ error: "请选择有效的复盘日期" }, { status: 400 });
+  }
+  for (const key of ["doneText", "problemText", "tomorrowText", "summary"]) {
+    if (body[key] != null && typeof body[key] !== "string") {
+      return NextResponse.json({ error: "复盘文本必须是文字" }, { status: 400 });
+    }
+  }
+  if (body.mood != null && (!Number.isInteger(body.mood) || body.mood < 1 || body.mood > 5)) {
+    return NextResponse.json({ error: "心情必须为 1 到 5 之间的整数" }, { status: 400 });
+  }
 
   const values = {
     doneText: body.doneText ?? null,
@@ -30,18 +45,10 @@ export async function POST(req: NextRequest) {
     updatedAt: nowIso(),
   };
 
-  const existing = await db.select().from(schema.reviews).where(eq(schema.reviews.date, date));
-  if (existing.length > 0) {
-    const [row] = await db
-      .update(schema.reviews)
-      .set(values)
-      .where(eq(schema.reviews.date, date))
-      .returning();
-    return NextResponse.json(row);
-  }
   const [row] = await db
     .insert(schema.reviews)
     .values({ date, ...values, createdAt: nowIso() })
+    .onConflictDoUpdate({ target: schema.reviews.date, set: values })
     .returning();
-  return NextResponse.json(row, { status: 201 });
+  return NextResponse.json(row);
 }

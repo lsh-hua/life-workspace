@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db";
-import { and, desc, eq, gte, lte, or } from "drizzle-orm";
+import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
 import { todayStr, weekDates } from "@/lib/dates";
+import { localDayWindow, reviewStreak } from "@/lib/day-rules";
+import { todayTaskWhere } from "@/lib/task-query";
 
 // GET /api/overview  总览页聚合数据
 export async function GET() {
@@ -11,7 +13,8 @@ export async function GET() {
   const allTasks = await db
     .select()
     .from(schema.tasks)
-    .where(or(eq(schema.tasks.dueDate, today), eq(schema.tasks.isToday, 1)));
+    .where(todayTaskWhere(schema.tasks, localDayWindow(today)))
+    .orderBy(asc(schema.tasks.sortOrder), asc(schema.tasks.id));
   const todayTotal = allTasks.length;
   const todayDone = allTasks.filter((t) => t.status === "done").length;
 
@@ -43,14 +46,7 @@ export async function GET() {
     .select({ date: schema.reviews.date })
     .from(schema.reviews)
     .orderBy(desc(schema.reviews.date));
-  let streak = 0;
-  const reviewDates = new Set(allReviews.map((r) => r.date));
-  const cursor = new Date();
-  if (!reviewDates.has(today)) cursor.setDate(cursor.getDate() - 1);
-  while (reviewDates.has(cursor.toISOString().slice(0, 10))) {
-    streak++;
-    cursor.setDate(cursor.getDate() - 1);
-  }
+  const streak = reviewStreak(allReviews.map((review) => review.date), today);
 
   return NextResponse.json({
     today: { total: todayTotal, done: todayDone, tasks: allTasks },

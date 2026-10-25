@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/db";
-import { and, asc, eq, gte, isNull, lte, or } from "drizzle-orm";
+import { and, asc, eq, gte, isNull, lte } from "drizzle-orm";
 import { todayStr, weekDates, nowIso } from "@/lib/dates";
+import { localDayWindow } from "@/lib/day-rules";
+import { todayTaskWhere } from "@/lib/task-query";
 
 // GET /api/tasks?filter=today|week|all&date=YYYY-MM-DD
 export async function GET(req: NextRequest) {
@@ -12,7 +14,7 @@ export async function GET(req: NextRequest) {
   if (date) {
     where = eq(schema.tasks.dueDate, date);
   } else if (filter === "today") {
-    where = or(eq(schema.tasks.dueDate, todayStr()), eq(schema.tasks.isToday, 1));
+    where = todayTaskWhere(schema.tasks, localDayWindow(todayStr()));
   } else if (filter === "week") {
     const days = weekDates();
     where = and(gte(schema.tasks.dueDate, days[0]), lte(schema.tasks.dueDate, days[6]));

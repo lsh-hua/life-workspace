@@ -3,7 +3,7 @@
 > **给后续维护者（人或 AI 模型）**：本文档是理解本项目的唯一入口。读完本文档即可上手开发。
 > **维护约定：每次完成功能迭代、架构调整或发布新版本后，必须同步更新本文档与 CHANGELOG.md。**
 
-最后更新：2026-10-04 · 当前版本：**1.2.0**
+最后更新：2026-10-25 · 当前版本：**1.3.0**
 
 ---
 
@@ -11,7 +11,7 @@
 
 「人生工作台」是一个**单用户、本地优先**的极简个人工作台 Web 应用，同时打包为 Windows 桌面应用（Electron）。所有数据保存在本地 SQLite 文件中，不上云。
 
-界面布局：左侧侧边栏导航 + 顶部全局搜索 + 右侧主区域。设计语言：极简、off-white 底、off-black 文字、无渐变无阴影堆砌。
+界面布局：左侧侧边栏导航 + 顶部全局搜索 + 右侧主区域。设计语言：克制的编辑感与工具感，暖灰底、近黑文字、单一陶土色强调；优先依靠字号、留白和分隔建立层级，避免卡片堆砌。
 
 ## 2. 技术栈
 
@@ -29,13 +29,13 @@
 
 ### 3.1 本机 Node 环境（重要）
 
-系统 PATH 里没有全局 Node。Kimi Work 托管的 Node 24 在：
+当前 PowerShell 中的 Node 与 npm 来自 `E:\node`；先用 `Get-Command node,npm.cmd,npx.cmd` 确认实际路径。旧环境的托管 Node 位于：
 
 ```
 C:\Users\sheng\AppData\Local\Programs\kimi-desktop\resources\resources\runtime
 ```
 
-每次在 Git Bash 里操作前必须：
+只有旧环境或 Git Bash 找不到 Node 时，才需要补充对应运行时的 PATH：
 
 ```bash
 export PATH="/c/Users/sheng/AppData/Local/Programs/kimi-desktop/resources/resources/runtime:$PATH"
@@ -54,6 +54,8 @@ npx.cmd next build --webpack   # 生产构建。必须用 --webpack，见 §7
 npm.cmd run db:generate    # 根据 db/schema.ts 生成迁移 SQL
 npm.cmd run db:migrate     # 应用迁移（scripts/migrate.mjs）
 npm.cmd run dist           # 桌面版打包（见 §6，有坑）
+npm.cmd test               # 纯领域、保存队列及隔离数据库回归
+npm.cmd run test:integration # 生产构建后，自动启动临时库服务验证 REST API
 ```
 
 ## 4. 目录结构
@@ -62,15 +64,16 @@ npm.cmd run dist           # 桌面版打包（见 §6，有坑）
 app/                  # Next.js 页面与 API 路由
   page.tsx            # 总览
   today/ week/ calendar/ habits/ review/ inspiration/ launch/ schedule/
+  settings/           # 本地备份管理、下载和恢复步骤
   api/                # REST 接口（tasks events reviews inspirations habits
-                      #   pomodoros courses sites groups overview search report hotspots）
+                      #   pomodoros courses sites groups overview search report hotspots backups）
 components/           # sidebar topbar pomodoro search-dialog task-item
 db/schema.ts          # 全部表定义（单一来源）
 db/migrations/        # drizzle-kit 生成的迁移 SQL
-lib/                  # API/日期工具 + course-schedule.ts（课程实例解析）
-tests/                # node:test 纯逻辑测试
-scripts/              # dev.mjs migrate.mjs seed.mjs build-desktop.mjs
-desktop-app/          # Electron 壳（main.cjs preload.cjs）+ release/ 产物
+lib/                  # API/日期、day-rules、task-query、review-autosave 与课程解析
+tests/                # node:test；数据库用例仅使用临时库或内存库
+scripts/              # 开发、事务迁移、快照备份与桌面构建
+desktop-app/          # Electron 壳、独立草稿存储 + release/<版本-时间>/ 产物
 data/workbench.db     # 本地 SQLite 数据文件（用户数据，勿删）
 PROJECT.md            # 本文档
 CHANGELOG.md          # 版本历史
@@ -85,20 +88,30 @@ PLAN.md               # 最初的产品规划（历史文档，仅供背景参�
 - 改表流程：改 `db/schema.ts` → `npm.cmd run db:generate` → `npm.cmd run db:migrate` → 构建验证。
 - **hotspots 表已停用但保留**（AI 热点模块下线时用户明确要求不丢数据），`/api/hotspots` 接口仍在。
 
+### 5.1 备份与恢复
+
+- 侧边栏“数据与备份”可创建完整 SQLite 快照、查看记录和下载副本；数据目录下的 `backups/` 保存每日、手动和迁移前备份，不自动删除。
+- 桌面启动时检查每日备份，运行期间每小时再次检查，同一本地日期只创建一次；网页版通过该页面手动备份。
+- 快照使用 `VACUUM INTO`，包括 WAL 内已提交内容，完成后执行完整性检查；不直接复制正在使用的数据库。
+- 迁移有待执行文件时，先生成升级快照；每个 SQL 文件与迁移记录在同一事务内提交。失败回滚该文件并中止桌面启动，已完成的前序迁移记录保持可识别。
+- 复盘未保存草稿独立于数据库快照：桌面保存在 `userData/drafts/`，不随随机服务端口改变；网页版保存在当前站点的 `localStorage`。
+
+恢复步骤：先下载所需备份并完全退出应用；将整个现有 `data` 文件夹改名留存（一起保留数据库及 WAL/SHM 日志）；在原位置新建 `data` 文件夹，复制选定备份并命名为 `workbench.db`；启动并核对记录。旧数据与旧备份仍保存在改名后的目录。切勿在应用运行时覆盖单个数据库文件。
+
 ## 6. 桌面版打包（electron-builder 有坑）
 
 `npm.cmd run dist`（scripts/build-desktop.mjs）是五步流程：Next standalone 构建 → 组装 server → 复制本地 Electron 运行时 → 复制桌面入口 → NSIS。流程不再调用容易被实时防护拖死的 `electron-builder dir`。
 
 **数据安全红线**：Next standalone 可能追踪并复制项目内 `data/workbench.db`。构建脚本会在组装后删除 `server/data/`，并扫描 `.db/.sqlite/.sqlite3`；发现数据库文件即中止打包。发布包只能包含空应用，真实数据始终位于运行时 `userData` 目录。
 
-**已知问题**：electron-builder 的 dir 阶段（解包 Electron 运行时）在本机会被 Windows 实时防护拖到超时（>5 分钟）。可用的绕过方案（2026-08-26 验证有效）：
+**历史排查记录（1.2.x）**：electron-builder 的 dir 阶段（解包 Electron 运行时）在本机会被 Windows 实时防护拖到超时（>5 分钟）。以下是 2026-08-26 的手动绕过流程，仅作故障背景；1.3.0 请优先使用已维护的 `npm.cmd run dist`，不能只复制旧版本入口：
 
 1. `npx.cmd next build --webpack`
-2. 手动组装 standalone（复制 `.next/standalone` + `.next/static` + `public` + `scripts/migrate.mjs` + `db/migrations` + `node_modules/@libsql/win32-x64-msvc` 到 `desktop-build/server`）
-3. 手动解压缓存的 Electron zip（`%LOCALAPPDATA%\electron\Cache\<hash>\electron-v*-win32-x64.zip`，用 `unzip`）到 `desktop-app/release/win-unpacked`，把 `electron.exe` 改名为 `人生工作台.exe`，复制 `main.cjs preload.cjs package.json` 到 `resources/app/`，复制 `desktop-build/server` 到 `resources/app/server/`
+2. 手动组装 standalone（复制 `.next/standalone` + `.next/static` + `public` + 数据脚本 + `db/migrations` + `node_modules/@libsql/win32-x64-msvc` 到组装目录；1.3.0 的数据脚本必须同时包含 `migrate.mjs`、`backup.mjs`、`data-safety.mjs`）
+3. 手动解压缓存的 Electron zip（`%LOCALAPPDATA%\electron\Cache\<hash>\electron-v*-win32-x64.zip`，用 `unzip`）到独立发布目录，把 `electron.exe` 改名为 `人生工作台.exe`，复制 `main.cjs preload.cjs draft-store.cjs package.json` 到 `resources/app/`，复制组装后的 server 到 `resources/app/server/`
 4. `npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked -c.directories.output=release`（此阶段很快）
 
-产物：`desktop-app/release/人生工作台 Setup <版本>.exe`。
+1.3.0 起，每次构建使用独立目录并保留旧安装包：`desktop-app/release/<版本>-<构建时间>/人生工作台 Setup <版本>.exe`。发布目录不包含数据库或草稿。
 
 **1.2.0 构建记录（2026-10-04）**：NSIS 安装器已成功生成。electron-builder 26.15.3 在项目没有 Git repository/publish 配置时，会在安装器生成后因空 provider 报错；基于 `win-unpacked` 重打包时需显式传入本地占位配置并禁止发布：
 
@@ -107,6 +120,12 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 ```
 
 该命令只生成本地发布描述，不上传文件。
+
+**1.2.1 构建记录（2026-10-05）**：`npm.cmd run dist` 完整通过，已生成 Windows x64 NSIS 安装器 `人生工作台 Setup 1.2.1.exe`；发布目录数据库扫描通过。
+
+**1.3.0 构建记录（2026-10-25）**：正式验收目录为 `desktop-app/release/1.3.0-20261025T071115713Z-d1c90c/`，安装器 `人生工作台 Setup 1.3.0.exe` 为 107,657,452 字节。SHA-256：`AE1EB5B66A45C3366FFA1930204B1FE1D3F9B04D83094C762026564F620AB2CD`。40 项回归通过、1 项因 Windows 文件符号链接权限跳过；源码生产服务和包内 Electron 运行时的 7 项 API 用例均通过；备份按钮、保存失败重试及草稿重新载入已完成浏览器验证。真实项目数据库哈希保持不变。
+
+包内验收：将 `WORKBENCH_PACKAGED_APP` 临时指向发布目录中的 `win-unpacked`，运行 `npm.cmd run test:integration`；脚本以包内 Electron 的 Node 模式启动复制后的服务及迁移，只使用临时数据库并在结束后关闭。发布前必须验证包内运行文件，不能只验证源码服务。首个未通过备份路由验收的构建目录带有 `VERIFICATION_FAILED.txt`，仅保留排查现场，不用于分发。
 
 **NSIS mmap 错误（2026-09-14 遇到）**：makensis 连续三次报 `Internal compiler error #12345: error creating mmap`，清理临时文件无效，疑与系统实时防护有关。绕过方案：改用 zip 目标 `npx.cmd electron-builder --win zip --prepackaged release/win-unpacked -c.directories.output=release`，产物为免安装便携包 `人生工作台-<版本>-win.zip`（解压即运行）。1.0.0 即以 zip 形式发布；日后机器环境变化后可重试 NSIS。
 
@@ -121,9 +140,10 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 
 ## 8. 功能现状
 
-### 已完成（1.2.0）
+### 已完成（1.3.0）
 
-- **总览** `/`：问候、今日/本周进度环、快速加任务/灵感、今日安排、习惯打卡卡、最新灵感
+- **总览** `/`：以今日主线为视觉锚点，整合本周进度、复盘、快速收纳、今日安排、灵感和习惯；具备加载、错误与空状态
+- **数据与备份** `/settings`：创建与下载完整快照，查看每日和升级备份，提供保留旧数据的恢复步骤
 - **今日待办** `/today`、**本周清单** `/week`（拖拽排序）、**日历** `/calendar`
 - **课程表** `/schedule`：周视图网格、第 N 周切换、单双周、单周微调（停课/调课）、学期设置，自动定位当前周；可配置节次时间与课前通知
 - **习惯打卡** `/habits`：12 周热力图、连续天数、新建/删除；总览页可一键打卡
@@ -131,6 +151,12 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 - **番茄钟**：左侧边栏内嵌面板，25 分钟倒计时（截止时间戳实现），可绑定任务，完成记录 + 系统通知；显示下一堂课并提示专注时间冲突
 - **开工** `/launch`：网站集合一键全开、本地文件（PDF 等）打开；桌面版侧边栏有开机自启动开关
 - **全局搜索**：Ctrl/⌘+K
+
+### 1.3.0 保存与日期规则
+
+- 复盘加载完成前暂时禁用编辑；输入先落草稿，网络写入串行合并为最新内容；失败明确显示并可重试。草稿与服务端版本冲突时，保留双方内容供用户选择。
+- 今日任务包括今天到期、手动加入今日且未完成，以及本地今天完成的任务。旧已完成任务退出今日统计但保留历史，不清除原有标记。
+- 首页与复盘页使用同一连续天数函数，统一按本地日期跨月、跨年和凌晨计算。
 
 ### 已下线
 
@@ -145,13 +171,16 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
   - 新功能（向后兼容）→ 次版本 +1
   - 修复/小调整 → 修订号 +1
 - 每次发版：更新两处 version → 在 CHANGELOG.md 记录 → 重新打 exe（产物文件名自动带版本号）。
-- 历史：0.1.0 首个桌面版；0.2.0 集合版开工 + 开机自启；1.0.0 首个稳定交接版；1.1.0 课程表与三栏复盘；**1.2.0 课程提醒与番茄钟联动**。
+- 历史：0.1.0 首个桌面版；0.2.0 集合版开工 + 开机自启；1.0.0 首个稳定交接版；1.1.0 课程表与三栏复盘；1.2.0 课程提醒与番茄钟联动；1.2.1 总览视觉重构；**1.3.0 备份、安全迁移与保存可靠性**。
 - 源码仓库：`https://github.com/lsh-hua/life-workspace`，默认分支 `main`。
 
 ## 10. 日后规划（候选方向，按用户意愿排序）
 
-1. 数据备份/导出（JSON 全量导出）
-2. 应用自定义图标（当前 exe 用 Electron 默认图标）
+1. 应用内版本检查与 GitHub Releases 更新
+2. 桌面单实例、启动恢复与番茄钟状态持久化
+3. 应用自定义图标（当前 exe 用 Electron 默认图标）
+
+当前全仓库 ESLint 仍有 9 个既有错误，分布在未改动页面和搜索/顶栏的数据加载 effect；本轮改动文件的目标检查通过。后续治理时按页面逐个处理，避免关闭全局规则掩盖问题。
 
 ---
 

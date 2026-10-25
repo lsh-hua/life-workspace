@@ -5,6 +5,10 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  {
+    files: ["desktop-app/**/*.cjs"],
+    rules: { "@typescript-eslint/no-require-imports": "off" },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
@@ -13,6 +17,7 @@ const eslintConfig = defineConfig([
     "build/**",
     "desktop-build/**",
     "desktop-app/release/**",
+    "life-workbench-desktop/**",
     "next-env.d.ts",
   ]),
 ]);

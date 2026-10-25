@@ -14,6 +14,7 @@ import {
   GraduationCap,
   PanelLeftClose,
   PanelLeftOpen,
+  ShieldCheck,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import Pomodoro from "./pomodoro";
@@ -85,6 +86,15 @@ export default function Sidebar() {
       {/* 桌面版设置：开机自启 */}
       {!collapsed && <AutoLaunchToggle />}
 
+      <Link
+        href="/settings"
+        title="数据与备份"
+        className={`mx-2 mb-3 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${pathname === "/settings" ? "bg-bg font-medium text-ink" : "text-muted hover:bg-bg hover:text-ink"} ${collapsed ? "justify-center px-0" : ""}`}
+      >
+        <ShieldCheck size={17} strokeWidth={1.8} />
+        {!collapsed && <span>数据与备份</span>}
+      </Link>
+
       {!collapsed && (
         <div className="px-5 pb-5 text-[11px] text-faint">本地优先 · 数据不上云</div>
       )}
@@ -100,6 +110,11 @@ declare global {
       openPath: (p: string) => Promise<string>;
       getAutoLaunch: () => Promise<boolean>;
       setAutoLaunch: (v: boolean) => Promise<boolean>;
+      reviewDrafts?: {
+        getItem: (key: string) => string | null;
+        setItem: (key: string, value: string) => void;
+        removeItem: (key: string) => void;
+      };
     };
   }
 }
