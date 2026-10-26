@@ -131,7 +131,7 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 
 **1.4.1 构建记录（2026-10-26）**：安装包位于 `desktop-app/release/1.4.1-20261026T113934112Z-e1df65/`，`人生工作台 Setup 1.4.1.exe` 为 107,698,088 字节。SHA-256：`39C6713C75816F0386CFFDB68C07BD2AC3DE930B94AF30155568F77B787C537E`。生产构建、TypeScript、主进程语法与目标 ESLint 检查通过；正式产物沿用数据库文件排除扫描。用户数据库 SHA-256 保持不变。
 
-**1.5.0 构建记录（2026-10-26）**：安装包位于 `desktop-app/release/1.5.0-20261026T115139721Z-1b9acd/`，`人生工作台 Setup 1.5.0.exe` 为 107,957,373 字节。SHA-256：`F6977FE925B0CE4298298464DDF85D86CB7AD11E5905BC2FA501610322D164EB`。生产构建、TypeScript、目标 ESLint 与主进程语法检查通过；程序和托盘图标资源已随包；真实项目数据库 SHA-256 仍为 `A5E7389BDC504B259A08DB14970BBE3E5C96DA15E203B3D9B9D3A608B1434C2B`。
+**1.5.0 构建与发布记录（2026-10-26）**：安装包位于 `desktop-app/release/1.5.0-20261026T115139721Z-1b9acd/`，`人生工作台 Setup 1.5.0.exe` 为 107,957,373 字节。SHA-256：`F6977FE925B0CE4298298464DDF85D86CB7AD11E5905BC2FA501610322D164EB`。已发布 [GitHub Release v1.5.0](https://github.com/lsh-hua/life-workspace/releases/tag/v1.5.0)，资产 `Setup.1.5.0.exe` 的大小与 SHA-256 均经核对。生产构建、TypeScript、目标 ESLint 与主进程语法检查通过；程序和托盘图标资源已随包；真实项目数据库 SHA-256 仍为 `A5E7389BDC504B259A08DB14970BBE3E5C96DA15E203B3D9B9D3A608B1434C2B`。
 
 **发布产物清理（2026-10-26）**：1.5.0 验收后清理 1.2.1 至 1.4.1 的旧安装器、失败构建目录、旧 `win-unpacked`、打包 staging 与 Next 缓存；发布目录仅保留 1.5.0。源码、正在运行的桌面目录、用户数据和备份不在清理范围。
 
@@ -178,11 +178,11 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 
 ### 1.5.0 更新、计时与图标
 
-- 版本检查由 `/api/updates` 同源代理 GitHub Releases；仓库暂无公开发行版时明确提示。检查使用 GitHub 官方“最新发行版”接口，手动触发且有 8 秒超时。
+- 版本检查由 `/api/updates` 同源代理 GitHub Releases；无公开发行版时明确提示。检查使用 GitHub 官方“最新发行版”接口，手动触发且有 8 秒超时。
 - 番茄钟会话在 Cookie 中保存 UUID、任务绑定和截止时间，因 Cookie 不按端口隔离，可跨桌面随机服务端口恢复。
 - `pomodoros.session_id` 唯一索引使结束请求可安全重试；历史行保留 NULL，迁移执行前仍由现有逻辑创建完整快照。
 - SVG 是图标源，PNG 用于托盘，ICO 用于 Windows 可执行文件与安装器。
-- GitHub 仓库当前尚无公开 Release；检查器已实现，发布第一版 GitHub Release 后即可比较并显示更新。
+- GitHub 已公开首个 Release v1.5.0；设置页版本检查可识别当前版本，后续发布更高版本后会显示更新提示。
 - 本次数据库变化只新增可空会话键与唯一索引；不更新或删除既有记录。
 
 ### 1.3.0 保存与日期规则

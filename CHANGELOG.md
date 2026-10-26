@@ -15,7 +15,9 @@
 
 ### 工程
 - 更新包构建增加 Electron PE 图标写入；版本检查经同源 Route Handler 访问 GitHub API
-- GitHub 仓库尚无公开 Release；检查器在首次发布前会明确显示当前没有公开发行版
+
+### 发布
+- 发布 [GitHub Release v1.5.0](https://github.com/lsh-hua/life-workspace/releases/tag/v1.5.0)，上传 Windows x64 NSIS 安装器 `Setup.1.5.0.exe`；文件大小与 SHA-256 见 `PROJECT.md`
 
 ## [1.4.1] - 2026-10-26
 
