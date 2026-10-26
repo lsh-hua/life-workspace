@@ -1,18 +1,19 @@
 "use client";
 
-import { Search } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Menu, Monitor, Moon, Search, Sun } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { pageLabel } from "@/lib/navigation";
+import type { ThemePreference } from "@/lib/ui-preferences";
 import SearchDialog from "./search-dialog";
 
-export default function Topbar() {
+export default function Topbar({ theme, onThemeChange, onOpenNavigation, navigationOpen }: {
+  theme: ThemePreference; onThemeChange: (theme: ThemePreference) => void; onOpenNavigation: () => void; navigationOpen: boolean;
+}) {
   const [open, setOpen] = useState(false);
-  const [now, setNow] = useState<Date | null>(null);
-
-  useEffect(() => {
-    setNow(new Date());
-    const t = setInterval(() => setNow(new Date()), 60_000);
-    return () => clearInterval(t);
-  }, []);
+  const pathname = usePathname();
+  const closeSearch = useCallback(() => setOpen(false), []);
+  const ThemeIcon = theme === "system" ? Monitor : theme === "dark" ? Moon : Sun;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -25,24 +26,34 @@ export default function Topbar() {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const dateLabel = now
-    ? `${now.getMonth() + 1}月${now.getDate()}日 周${"日一二三四五六"[now.getDay()]}`
-    : "";
-
   return (
-    <header className="flex h-14 shrink-0 items-center border-b border-line bg-surface px-5">
+    <header className="app-topbar">
+      <button type="button" className="icon-button md:hidden" onClick={onOpenNavigation} aria-controls="app-navigation" aria-expanded={navigationOpen} aria-label="打开导航"><Menu size={19} /></button>
+      <p className="hidden min-w-24 text-xs text-muted md:block">工作台 <span className="mx-2 text-line">/</span> <span className="text-ink">{pageLabel(pathname)}</span></p>
       <button
+        type="button"
         onClick={() => setOpen(true)}
-        className="mx-auto flex w-full max-w-md items-center gap-2 rounded-lg border border-line bg-bg px-3.5 py-2 text-sm text-faint transition-colors hover:border-faint"
+        className="topbar-search"
+        aria-label="搜索任务、灵感、复盘、日程"
+        aria-haspopup="dialog"
+        aria-keyshortcuts="Control+K Meta+K"
       >
         <Search size={15} />
-        <span className="flex-1 text-left">搜索任务、灵感、复盘、日程…</span>
-        <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-faint">
+        <span className="flex-1 truncate text-left"><span className="hidden sm:inline">搜索任务、灵感、复盘、日程</span><span className="sm:hidden">搜索工作台</span></span>
+        <kbd className="hidden rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-muted sm:block">
           Ctrl K
         </kbd>
       </button>
-      <div className="ml-auto pl-4 text-sm text-muted">{dateLabel}</div>
-      <SearchDialog open={open} onClose={() => setOpen(false)} />
+      <label className="theme-picker">
+        <ThemeIcon size={15} aria-hidden="true" />
+        <span className="sr-only">界面主题</span>
+        <select value={theme} onChange={(event) => onThemeChange(event.target.value as ThemePreference)} aria-label="界面主题">
+          <option value="system">跟随系统</option>
+          <option value="light">浅色</option>
+          <option value="dark">深色</option>
+        </select>
+      </label>
+      <SearchDialog open={open} onClose={closeSearch} />
     </header>
   );
 }

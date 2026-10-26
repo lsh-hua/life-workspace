@@ -1,9 +1,10 @@
 // Electron 主进程：内置 Next standalone 服务 + 窗口 + 托盘 + 开机自启
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, nativeImage } = require("electron");
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, shell, nativeImage, screen } = require("electron");
 const { spawn } = require("node:child_process");
 const path = require("node:path");
 const fs = require("node:fs");
 const net = require("node:net");
+const { randomUUID } = require("node:crypto");
 const { createDraftStore } = require("./draft-store.cjs");
 
 const isDev = !app.isPackaged;
@@ -14,7 +15,55 @@ let backupTimer = null;
 let openingWindow = null;
 let localAppOrigin = null;
 let draftStore = null;
+let windowStateTimer = null;
 const dataProcesses = new Set();
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+function windowStateFile() {
+  return path.join(app.getPath("userData"), "window-state.json");
+}
+
+function isVisibleOnDisplay(bounds) {
+  return screen.getAllDisplays().some(({ workArea }) => {
+    const width = Math.min(bounds.x + bounds.width, workArea.x + workArea.width) - Math.max(bounds.x, workArea.x);
+    const height = Math.min(bounds.y + bounds.height, workArea.y + workArea.height) - Math.max(bounds.y, workArea.y);
+    return width >= 120 && height >= 120;
+  });
+}
+
+function readWindowState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(windowStateFile(), "utf8"));
+    const { x, y, width, height } = state.bounds ?? {};
+    const valid = [x, y, width, height].every(Number.isFinite) &&
+      width >= 960 && width <= 4000 && height >= 640 && height <= 3000;
+    if (state.version !== 1 || !valid || !isVisibleOnDisplay({ x, y, width, height })) return null;
+    return { bounds: { x, y, width, height }, maximized: state.maximized === true };
+  } catch {
+    return null;
+  }
+}
+
+function saveWindowState(window) {
+  if (window.isDestroyed()) return;
+  const maximized = window.isMaximized();
+  const bounds = maximized ? window.getNormalBounds() : window.getBounds();
+  const file = windowStateFile();
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify({ version: 1, bounds, maximized }), { encoding: "utf8", mode: 0o600 });
+    fs.renameSync(temporary, file);
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch {}
+    log("窗口状态保存失败", error.message);
+  }
+}
+
+function queueWindowStateSave(window) {
+  clearTimeout(windowStateTimer);
+  windowStateTimer = setTimeout(() => saveWindowState(window), 300);
+  windowStateTimer.unref();
+}
 
 function logFile() {
   try {
@@ -161,21 +210,26 @@ async function createWindow() {
   await startServer(port);
   const url = isDev ? "http://localhost:3000" : `http://127.0.0.1:${port}`;
   localAppOrigin = new URL(url).origin;
+  const savedState = readWindowState();
 
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 840,
+    ...(savedState?.bounds ?? { width: 1280, height: 840 }),
     minWidth: 960,
     minHeight: 640,
     title: "人生工作台",
     backgroundColor: "#fafafa",
     autoHideMenuBar: true,
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
     },
   });
+
+  mainWindow.on("resize", () => queueWindowStateSave(mainWindow));
+  mainWindow.on("move", () => queueWindowStateSave(mainWindow));
+  mainWindow.on("close", () => saveWindowState(mainWindow));
 
   // 外链用系统浏览器打开
   mainWindow.webContents.setWindowOpenHandler(({ url: u }) => {
@@ -197,6 +251,8 @@ async function createWindow() {
 
   mainWindow.on("closed", () => (mainWindow = null));
   await mainWindow.loadURL(url);
+  if (savedState?.maximized) mainWindow.maximize();
+  mainWindow.show();
 }
 
 function startupFailure(error) {
@@ -209,6 +265,7 @@ async function openWindow() {
   if (mainWindow) {
     if (mainWindow.isMinimized()) mainWindow.restore();
     mainWindow.show();
+    mainWindow.focus();
     return;
   }
   if (openingWindow) return openingWindow;
@@ -238,7 +295,8 @@ function registerDraftStorage() {
 }
 
 function createTray() {
-  const icon = nativeImage.createEmpty();
+  const icon = nativeImage.createFromPath(path.join(__dirname, "icon.png"));
+  if (icon.isEmpty()) log("托盘图标无法读取");
   tray = new Tray(icon);
   tray.setToolTip("人生工作台");
   tray.setContextMenu(
@@ -258,7 +316,11 @@ function setAutoLaunch(enabled) {
   app.setLoginItemSettings({ openAtLogin: !!enabled });
 }
 
+if (!hasSingleInstanceLock) app.quit();
+else app.on("second-instance", () => { void openWindow(); });
+
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) return;
   registerDraftStorage();
   ipcMain.handle("autolaunch:get", () => getAutoLaunch());
   ipcMain.handle("autolaunch:set", (_e, enabled) => {
@@ -291,6 +353,7 @@ app.on("window-all-closed", () => {
 
 app.on("will-quit", () => {
   if (backupTimer) clearInterval(backupTimer);
+  if (windowStateTimer) clearTimeout(windowStateTimer);
   for (const child of dataProcesses) child.kill();
   if (serverProcess) {
     try {

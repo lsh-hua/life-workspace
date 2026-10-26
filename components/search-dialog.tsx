@@ -2,8 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { ArrowUpRight, CalendarDays, CheckSquare, Lightbulb, PenLine, Search, SearchX, X } from "lucide-react";
 import { api } from "@/lib/api";
-import { Search } from "lucide-react";
 
 type Result = {
   tasks: { id: number; title: string }[];
@@ -12,123 +12,153 @@ type Result = {
   reviews: { id: number; date: string; summary: string | null }[];
 };
 
-const GROUPS: { key: keyof Result; label: string; href: string }[] = [
-  { key: "tasks", label: "任务", href: "/today" },
-  { key: "events", label: "日程", href: "/calendar" },
-  { key: "inspirations", label: "灵感", href: "/inspiration" },
-  { key: "reviews", label: "复盘", href: "/review" },
-];
+const GROUPS = [
+  { key: "tasks", label: "任务", href: "/today", icon: CheckSquare },
+  { key: "events", label: "日程", href: "/calendar", icon: CalendarDays },
+  { key: "inspirations", label: "灵感", href: "/inspiration", icon: Lightbulb },
+  { key: "reviews", label: "复盘", href: "/review", icon: PenLine },
+] as const;
 
-export default function SearchDialog({
-  open,
-  onClose,
-}: {
-  open: boolean;
-  onClose: () => void;
-}) {
-  const [q, setQ] = useState("");
-  const [result, setResult] = useState<Result | null>(null);
+type SearchResponse = { query: string; result: Result | null; error: boolean };
+
+export default function SearchDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  return open ? <SearchContent onClose={onClose} /> : null;
+}
+
+function SearchContent({ onClose }: { onClose: () => void }) {
+  const [query, setQuery] = useState("");
+  const [response, setResponse] = useState<SearchResponse | null>(null);
+  const [reload, setReload] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
   const router = useRouter();
+  const term = query.trim();
+  const current = response?.query === term ? response : null;
+  const result = current?.result ?? null;
+  const loading = !!term && !current;
+  const total = result ? GROUPS.reduce((count, group) => count + result[group.key].length, 0) : 0;
 
   useEffect(() => {
-    if (open) {
-      setQ("");
-      setResult(null);
-      setTimeout(() => inputRef.current?.focus(), 30);
-    }
-  }, [open]);
+    const previous = document.activeElement;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    inputRef.current?.focus();
+    return () => {
+      dialog?.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
+    };
+  }, []);
 
   useEffect(() => {
-    if (!q.trim()) {
-      setResult(null);
-      return;
-    }
-    const t = setTimeout(async () => {
-      const data = await api<Result>(`/api/search?q=${encodeURIComponent(q.trim())}`);
-      setResult(data);
+    if (!term) return;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      api<Result>(`/api/search?q=${encodeURIComponent(term)}`, { signal: controller.signal })
+        .then((result) => { if (!controller.signal.aborted) setResponse({ query: term, result, error: false }); })
+        .catch(() => { if (!controller.signal.aborted) setResponse({ query: term, result: null, error: true }); });
     }, 200);
-    return () => clearTimeout(t);
-  }, [q]);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [term, reload]);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    if (open) window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
-
-  if (!open) return null;
-
-  const go = (href: string) => {
+  function go(href: string) {
     onClose();
     router.push(href);
-  };
+  }
 
-  const hasAny =
-    result && GROUPS.some((g) => (result[g.key] as unknown[]).length > 0);
+  function resultLabel(item: Result[keyof Result][number]) {
+    if ("title" in item) return item.title;
+    if ("content" in item) return item.content;
+    return item.summary || `${item.date} 的复盘`;
+  }
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-black/20 pt-[15vh]"
-      onClick={onClose}
+    <dialog
+      ref={dialogRef}
+      aria-labelledby="global-search-title"
+      aria-describedby="global-search-help"
+      className="fixed inset-x-4 top-[10dvh] m-0 mx-auto w-auto max-w-xl overflow-hidden rounded-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-overlay"
+      onCancel={(event) => { event.preventDefault(); onClose(); }}
+      onKeyDown={(event) => {
+        if (event.key !== "Tab") return;
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])"))
+          .filter((element) => element.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        if (event.shiftKey ? document.activeElement === first : document.activeElement === last) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        }
+      }}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
-      <div
-        className="anim-fade-up w-full max-w-lg overflow-hidden rounded-xl border border-line bg-surface shadow-2xl"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center gap-2 border-b border-line px-4">
-          <Search size={16} className="text-faint" />
+      <div className="border-b border-line px-5 pb-4 pt-5 sm:px-6">
+        <div className="mb-4 flex items-center justify-between gap-4">
+          <h2 id="global-search-title" className="text-base font-semibold">全局搜索</h2>
+          <button type="button" onClick={onClose} aria-label="关闭搜索" className="btn-ghost px-2"><X size={16} /></button>
+        </div>
+        <label htmlFor="global-search-input" className="mb-2 block text-xs font-medium text-muted">搜索任务、日程、灵感或复盘</label>
+        <div className="flex items-center gap-2 rounded-lg border border-line bg-bg px-3 focus-within:border-accent">
+          <Search size={17} className="shrink-0 text-muted" aria-hidden="true" />
           <input
+            id="global-search-input"
             ref={inputRef}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="输入关键词搜索…"
-            className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown") {
+                event.preventDefault();
+                dialogRef.current?.querySelector<HTMLButtonElement>("[data-search-result]")?.focus();
+              }
+            }}
+            placeholder="输入关键词"
+            autoComplete="off"
+            className="h-11 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-faint"
           />
         </div>
-        <div className="max-h-[50vh] overflow-y-auto p-2">
-          {result && !hasAny && (
-            <div className="px-3 py-8 text-center text-sm text-faint">没有找到相关内容</div>
-          )}
-          {result &&
-            GROUPS.map((g) => {
-              const items = result[g.key];
-              if (!items.length) return null;
-              const label = (item: (typeof items)[number]): string => {
-                switch (g.key) {
-                  case "tasks":
-                  case "events":
-                    return (item as Result["tasks"][number]).title;
-                  case "inspirations":
-                    return (item as Result["inspirations"][number]).content;
-                  case "reviews": {
-                    const r = item as Result["reviews"][number];
-                    return `${r.date} ${r.summary ?? ""}`;
-                  }
-                }
-              };
-              return (
-                <div key={g.key} className="mb-1">
-                  <div className="px-3 py-1.5 text-[11px] font-medium text-faint">{g.label}</div>
-                  {items.map((item) => (
-                    <button
-                      key={`${g.key}-${item.id}`}
-                      onClick={() => go(g.href)}
-                      className="block w-full truncate rounded-md px-3 py-2 text-left text-sm text-ink hover:bg-bg"
-                    >
-                      {label(item)}
-                    </button>
-                  ))}
-                </div>
-              );
-            })}
-          {!result && (
-            <div className="px-3 py-8 text-center text-sm text-faint">
-              搜索任务、日程、灵感、复盘
-            </div>
-          )}
-        </div>
       </div>
-    </div>
+
+      <div className="max-h-[55dvh] min-h-40 overflow-y-auto px-3 py-3" aria-live="polite" aria-busy={loading}>
+        {!term && <div className="px-5 py-8 text-center text-sm leading-6 text-muted">输入内容，查找工作台中的记录。</div>}
+        {loading && (
+          <div role="status" aria-label="正在搜索" className="space-y-3 px-3 py-4 motion-safe:animate-pulse">
+            <div className="h-4 w-20 rounded bg-line" />
+            <div className="h-10 rounded-lg bg-bg" />
+            <div className="h-10 rounded-lg bg-bg" />
+          </div>
+        )}
+        {current?.error && (
+          <div role="alert" className="px-5 py-7 text-center">
+            <p className="text-sm text-muted">搜索暂时不可用，请重试。</p>
+            <button type="button" onClick={() => { setResponse(null); setReload((value) => value + 1); }} className="btn-ghost mt-4">重新搜索</button>
+          </div>
+        )}
+        {result && total === 0 && (
+          <div className="px-5 py-7 text-center">
+            <SearchX size={24} className="mx-auto mb-3 text-muted" aria-hidden="true" />
+            <p className="text-sm font-medium">没有找到相关记录</p>
+            <p className="mt-1 text-xs leading-6 text-muted">试试更短的关键词，或换一种说法。</p>
+          </div>
+        )}
+        {result && GROUPS.map(({ key, label, href, icon: Icon }) => {
+          const items = result[key];
+          if (!items.length) return null;
+          return (
+            <section key={key} aria-label={label} className="mb-3 last:mb-0">
+              <h3 className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-muted"><Icon size={14} />{label}<span className="tnum">{items.length}</span></h3>
+              {items.map((item) => (
+                <button key={`${key}-${item.id}`} type="button" data-search-result onClick={() => go(href)} className="group flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-bg">
+                  <span className="min-w-0 flex-1">
+                    <span className="line-clamp-2 break-words text-sm leading-6">{resultLabel(item)}</span>
+                    {"date" in item && <span className="mt-0.5 block text-xs text-muted tnum">{item.date}</span>}
+                  </span>
+                  <ArrowUpRight size={15} className="shrink-0 text-faint group-hover:text-accent" aria-hidden="true" />
+                </button>
+              ))}
+            </section>
+          );
+        })}
+      </div>
+      <p id="global-search-help" className="border-t border-line px-5 py-3 text-xs text-muted sm:px-6">使用 Tab 选择结果，回车打开；按 Esc 关闭。</p>
+    </dialog>
   );
 }

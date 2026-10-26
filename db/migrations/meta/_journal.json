@@ -29,6 +29,13 @@
       "when": 1787747556125,
       "tag": "0003_first_justin_hammer",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793015185367,
+      "tag": "0004_high_rawhide_kid",
+      "breakpoints": true
     }
   ]
 }

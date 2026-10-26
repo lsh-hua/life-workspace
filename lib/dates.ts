@@ -13,7 +13,7 @@ export function weekDates(ref: Date = new Date()): string[] {
 export function weekRangeLabel(ref: Date = new Date()): string {
   const s = startOfWeek(ref, { weekStartsOn: 1 });
   const e = endOfWeek(ref, { weekStartsOn: 1 });
-  return `${format(s, "M月d日")} – ${format(e, "M月d日")}`;
+  return `${format(s, "M月d日")} - ${format(e, "M月d日")}`;
 }
 
 export const isOverdue = (dateStr: string) =>

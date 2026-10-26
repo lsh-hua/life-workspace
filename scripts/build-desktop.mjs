@@ -1,6 +1,6 @@
 // 桌面包构建：Next standalone → 组装 Electron 运行目录 → NSIS 安装器。
 // 直接复用已安装的 Electron 运行时，避开 electron-builder dir 在本机被实时防护拖死的问题。
-// 每次构建独立输出到版本与时间戳目录，保留已有安装器和构建现场。
+// 每次构建独立输出到版本与时间戳目录，验收后的旧产物可单独清理。
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -75,12 +75,16 @@ if (!fs.existsSync(path.join(electronDist, "electron.exe"))) {
   throw new Error("缺少 Electron 运行时，请先执行 npm install");
 }
 fs.cpSync(electronDist, unpacked, { recursive: true });
-fs.renameSync(path.join(unpacked, "electron.exe"), path.join(unpacked, "人生工作台.exe"));
+const electronExecutable = path.join(unpacked, "electron.exe");
+const resourceEditor = path.join(root, "node_modules", "electron-winstaller", "vendor", "rcedit.exe");
+if (!fs.existsSync(resourceEditor)) throw new Error("缺少 rcedit，无法设置桌面应用图标");
+execFileSync(resourceEditor, [electronExecutable, "--set-icon", path.join(appDir, "icon.ico")], { stdio: "inherit" });
+fs.renameSync(electronExecutable, path.join(unpacked, "人生工作台.exe"));
 
 console.log("[4/5] 复制桌面入口与 server...");
 const targetApp = path.join(unpacked, "resources", "app");
 fs.mkdirSync(targetApp, { recursive: true });
-for (const file of ["main.cjs", "preload.cjs", "draft-store.cjs", "package.json"]) {
+for (const file of ["main.cjs", "preload.cjs", "draft-store.cjs", "package.json", "icon.png", "icon.ico"]) {
   fs.copyFileSync(path.join(appDir, file), path.join(targetApp, file));
 }
 fs.cpSync(standalone, path.join(targetApp, "server"), { recursive: true });

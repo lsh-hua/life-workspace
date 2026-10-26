@@ -127,7 +127,8 @@ export const pomodoros = sqliteTable("pomodoros", {
   taskId: integer("task_id"), // 可空，允许无任务纯计时
   minutes: integer("minutes").notNull().default(25),
   finishedAt: text("finished_at").notNull(),
-});
+  sessionId: text("session_id"), // 客户端会话键，重试完成记录时保持幂等
+}, (t) => [uniqueIndex("pomodoros_session_id_unique").on(t.sessionId)]);
 
 // 课程表（周期性课程）
 export const courses = sqliteTable("courses", {

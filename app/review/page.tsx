@@ -5,6 +5,7 @@ import { api } from "@/lib/api";
 import type { Habit, HabitLog, Review, Task } from "@/db/schema";
 import { todayStr } from "@/lib/dates";
 import { reviewStreak } from "@/lib/day-rules";
+import { EmptyState, PageError, PageHeader, PageLoading } from "@/components/page-header";
 import {
   createReviewAutosave, EMPTY_REVIEW, parseReviewDraft, sameReview,
   type ReviewAutosave, type ReviewForm, type ReviewSaveSnapshot,
@@ -26,27 +27,44 @@ export default function ReviewPage() {
   const [tab, setTab] = useState<Tab>("day");
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-8">
-      <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">复盘</h1>
-        <div className="mt-3 flex gap-1 rounded-lg border border-line bg-surface p-1 w-fit">
+    <div className="page-shell">
+      <PageHeader title="复盘" description="记录进展、整理问题，为下一步留出清晰方向。" actions={
+        <div role="tablist" aria-label="复盘周期" className="grid w-full grid-cols-3 gap-1 rounded-xl border border-line bg-surface p-1 sm:w-auto">
           {TABS.map((t) => (
             <button
               key={t.key}
+              id={`review-tab-${t.key}`}
+              type="button"
+              role="tab"
+              aria-selected={tab === t.key}
+              aria-controls={`review-panel-${t.key}`}
+              tabIndex={tab === t.key ? 0 : -1}
               onClick={() => setTab(t.key)}
-              className={`rounded-md px-4 py-1.5 text-sm transition-colors ${
-                tab === t.key ? "bg-ink text-white" : "text-muted hover:text-ink"
+              onKeyDown={(event) => {
+                const index = TABS.findIndex((item) => item.key === tab);
+                const next = event.key === "ArrowRight" ? (index + 1) % TABS.length
+                  : event.key === "ArrowLeft" ? (index + TABS.length - 1) % TABS.length
+                    : event.key === "Home" ? 0 : event.key === "End" ? TABS.length - 1 : -1;
+                if (next < 0) return;
+                event.preventDefault();
+                setTab(TABS[next].key);
+                document.getElementById(`review-tab-${TABS[next].key}`)?.focus();
+              }}
+              className={`min-h-9 rounded-lg px-4 py-2 text-sm font-medium whitespace-nowrap transition-colors ${
+                tab === t.key ? "bg-ink text-on-ink" : "text-muted hover:bg-bg hover:text-ink"
               }`}
             >
               {t.label}
             </button>
           ))}
         </div>
-      </header>
+      } />
 
-      {tab === "day" && <DayReview />}
-      {tab === "week" && <PeriodReview period="week" />}
-      {tab === "month" && <PeriodReview period="month" />}
+      <section role="tabpanel" id={`review-panel-${tab}`} aria-labelledby={`review-tab-${tab}`}>
+        {tab === "day" && <DayReview />}
+        {tab === "week" && <PeriodReview period="week" />}
+        {tab === "month" && <PeriodReview period="month" />}
+      </section>
     </div>
   );
 }
@@ -175,12 +193,12 @@ function DayReview() {
     key: "doneText" | "problemText" | "tomorrowText",
     placeholder: string
   ) => (
-    <div className="card p-4">
-      <label htmlFor={`review-${key}`} className="mb-2 block text-xs font-medium text-muted">{label}</label>
+    <div className={`card p-5 ${key === "doneText" ? "md:col-span-2" : ""}`}>
+      <label htmlFor={`review-${key}`} className="mb-3 block text-sm font-medium">{label}</label>
       {key === "doneText" && doneTasks.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {doneTasks.map((t) => (
-            <span key={t.id} className="rounded-full bg-bg px-2 py-0.5 text-[11px] text-muted">
+            <span key={t.id} className="rounded-md bg-bg px-2 py-1 text-xs text-muted">
               ✓ {t.title}
             </span>
           ))}
@@ -192,14 +210,14 @@ function DayReview() {
         onChange={(e) => update({ [key]: e.target.value })}
         placeholder={placeholder}
         rows={3}
-        className="w-full resize-none bg-transparent text-sm outline-none placeholder:text-faint"
+        className="min-h-28 w-full resize-y rounded-lg bg-transparent text-sm leading-7 outline-none placeholder:text-faint"
       />
     </div>
   );
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
         <p className="text-sm text-muted tnum">
           {today} ·{" "}
           <span id="review-save-status" role="status" aria-live="polite" className={`inline-flex items-center gap-1 ${state.status === "error" ? "text-danger" : "text-muted"}`}>
@@ -207,7 +225,7 @@ function DayReview() {
           </span>
         </p>
         {streak > 0 && (
-          <span className="flex items-center gap-1 rounded-full bg-ink px-3 py-1 text-xs text-white">
+          <span className="flex items-center gap-1.5 rounded-lg bg-accent-soft px-3 py-1.5 text-xs font-medium text-accent">
             <Flame size={13} /> 连续 {streak} 天
           </span>
         )}
@@ -250,14 +268,14 @@ function DayReview() {
         </div>
       )}
 
-      <fieldset disabled={!session || !!loadError || state.conflict} aria-describedby="review-save-status" className="space-y-4 disabled:opacity-60">
+      <fieldset disabled={!session || !!loadError || state.conflict} aria-describedby="review-save-status" className="grid min-w-0 gap-4 disabled:opacity-60 md:grid-cols-2">
         {field("今天完成了什么？", "doneText", "记录今天的进展与成果…")}
         {field("遇到什么问题 / 没完成什么？", "problemText", "阻碍、卡点、遗留…")}
         {field("明天最重要的 1-3 件事？", "tomorrowText", "给明天的自己留个指引…")}
 
-        <div className="card p-4">
-          <label className="mb-2 block text-xs font-medium text-muted">今日心情</label>
-          <div className="flex gap-2">
+        <div className="card min-w-0 p-5 md:col-span-2">
+          <p id="review-mood-label" className="mb-3 text-sm font-medium">今日心情</p>
+          <div role="group" aria-labelledby="review-mood-label" className="flex flex-wrap gap-2">
             {MOODS.map((m, i) => (
               <button
                 key={i}
@@ -265,36 +283,37 @@ function DayReview() {
                 aria-label={MOOD_LABEL[i + 1]}
                 aria-pressed={form.mood === i + 1}
                 onClick={() => update({ mood: i + 1 })}
-                className={`rounded-lg px-3 py-1.5 text-xl transition-transform ${
-                  form.mood === i + 1 ? "scale-110 bg-bg ring-1 ring-ink" : "opacity-50 hover:opacity-100"
+                className={`min-h-11 min-w-11 rounded-lg border px-3 py-2 text-xl transition-colors ${
+                  form.mood === i + 1 ? "border-accent bg-accent-soft" : "border-line hover:bg-bg"
                 }`}
               >
                 {m}
               </button>
             ))}
           </div>
+          <label htmlFor="review-summary" className="mb-2 mt-5 block text-sm font-medium">一句话总结今天</label>
           <input
-            aria-label="一句话总结今天"
+            id="review-summary"
             value={form.summary}
             onChange={(e) => update({ summary: e.target.value })}
             placeholder="一句话总结今天…"
-            className="mt-3 h-9 w-full rounded-lg border border-line bg-bg px-3 text-sm outline-none placeholder:text-faint"
+            className="input"
           />
         </div>
       </fieldset>
 
       {history.length > 0 && (
-        <section className="mt-10">
-          <h2 className="mb-3 text-sm font-semibold">历史复盘</h2>
-          <div className="space-y-2">
+        <section className="mt-8">
+          <h2 className="mb-4 text-sm font-semibold">历史复盘</h2>
+          <div className="overflow-hidden rounded-xl border border-line bg-surface">
             {history.slice(0, 14).map((r) => (
-              <details key={r.id} className="card px-4 py-3">
-                <summary className="flex cursor-pointer items-center gap-3 text-sm">
+              <details key={r.id} className="border-b border-line px-4 py-4 last:border-b-0 sm:px-5">
+                <summary className="flex min-h-7 cursor-pointer items-center gap-3 text-sm">
                   <span className="font-medium tnum">{r.date}</span>
                   {r.mood && <span>{MOODS[r.mood - 1]}</span>}
-                  <span className="truncate text-muted">{r.summary ?? ""}</span>
+                  <span className="min-w-0 flex-1 truncate text-muted">{r.summary || "展开查看"}</span>
                 </summary>
-                <div className="mt-3 space-y-2 border-t border-line pt-3 text-sm text-muted">
+                <div className="mt-3 space-y-3 whitespace-pre-wrap break-words border-t border-line pt-4 text-sm leading-7 text-muted">
                   {r.doneText && <p><b className="text-ink">完成：</b>{r.doneText}</p>}
                   {r.problemText && <p><b className="text-ink">问题：</b>{r.problemText}</p>}
                   {r.tomorrowText && <p><b className="text-ink">明日：</b>{r.tomorrowText}</p>}
@@ -331,6 +350,7 @@ function PeriodReview({ period }: { period: "week" | "month" }) {
   const [offset, setOffset] = useState(0);
   const [report, setReport] = useState<{ key: string; data: ReportData | null; error: string | null } | null>(null);
   const [copied, setCopied] = useState(false);
+  const [copyError, setCopyError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
   const key = `${period}:${offset}`;
   const data = report?.key === key ? report.data : null;
@@ -389,79 +409,86 @@ function PeriodReview({ period }: { period: "week" | "month" }) {
         if (review?.summary) lines.push(`- 复盘:${review.summary}`);
       }
     }
-    await navigator.clipboard.writeText(lines.filter((l): l is string => l !== null).join("\n"));
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    try {
+      await navigator.clipboard.writeText(lines.filter((l): l is string => l !== null).join("\n"));
+      setCopyError(null);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopyError("复制未完成，请检查剪贴板权限后重试。");
+    }
   };
 
   return (
     <>
-      <div className="mb-6 flex items-center justify-between">
-        <p className="text-sm text-muted">{data?.range.label ?? "加载中…"}</p>
-        <div className="flex items-center gap-2">
-          <button onClick={() => setOffset((v) => v - 1)} className="btn-ghost px-2" title={period === "week" ? "上一周" : "上一月"}>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm font-medium text-muted tnum">{data?.range.label.replace(/[\u2013\u2014]/g, "-") ?? "正在加载统计"}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <button type="button" onClick={() => setOffset((v) => v - 1)} className="btn-ghost px-2" title={period === "week" ? "上一周" : "上一月"} aria-label={period === "week" ? "上一周" : "上一月"}>
             <ChevronLeft size={16} />
           </button>
           {offset !== 0 && (
-            <button onClick={() => setOffset(0)} className="btn-ghost text-xs">
+            <button type="button" onClick={() => setOffset(0)} className="btn-ghost text-xs">
               {period === "week" ? "回到本周" : "回到本月"}
             </button>
           )}
           <button
+            type="button"
             onClick={() => setOffset((v) => Math.min(0, v + 1))}
             disabled={offset === 0}
             className="btn-ghost px-2 disabled:opacity-40"
             title={period === "week" ? "下一周" : "下一月"}
+            aria-label={period === "week" ? "下一周" : "下一月"}
           >
             <ChevronRight size={16} />
           </button>
-          <button onClick={copyMarkdown} className="btn-primary gap-1.5 text-xs">
+          <button type="button" disabled={!data} onClick={copyMarkdown} className="btn-primary gap-1.5 text-xs">
             {copied ? <Check size={14} /> : <Copy size={14} />}
             {copied ? "已复制" : "复制 Markdown"}
           </button>
         </div>
       </div>
+      {copyError && <p role="alert" className="mb-4 text-sm text-danger">{copyError}</p>}
 
-      {!data ? (
-        <div role={error ? "alert" : "status"} className="py-12 text-center text-sm text-faint">
-          {error ?? "加载中…"}
-          {error && <button type="button" onClick={() => setReload((value) => value + 1)} className="btn-ghost ml-3">重新加载</button>}
-        </div>
+      {!data ? error ? (
+        <PageError message={error} onRetry={() => setReload((value) => value + 1)} />
+      ) : (
+        <PageLoading rows={4} />
       ) : (
         <>
-          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <div className="card p-4">
-              <div className="text-xs text-muted">完成任务</div>
-              <div className="mt-1 text-xl font-semibold tnum">
+          <dl className="mb-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-line bg-line sm:grid-cols-4">
+            <div className="bg-surface p-4 sm:p-5">
+              <dt className="text-xs text-muted">完成任务</dt>
+              <dd className="mt-2 text-2xl font-semibold tnum">
                 {data.stats.tasksDone}
                 <span className="text-sm font-normal text-faint">/{data.stats.tasksTotal}</span>
-              </div>
+              </dd>
             </div>
-            <div className="card p-4">
-              <div className="text-xs text-muted">复盘天数</div>
-              <div className="mt-1 text-xl font-semibold tnum">
+            <div className="bg-surface p-4 sm:p-5">
+              <dt className="text-xs text-muted">复盘天数</dt>
+              <dd className="mt-2 text-2xl font-semibold tnum">
                 {data.stats.reviewDays}
                 <span className="text-sm font-normal text-faint">/{days.length}</span>
-              </div>
+              </dd>
             </div>
-            <div className="card p-4">
-              <div className="text-xs text-muted">习惯打卡</div>
-              <div className="mt-1 text-xl font-semibold tnum">
+            <div className="bg-surface p-4 sm:p-5">
+              <dt className="text-xs text-muted">习惯打卡</dt>
+              <dd className="mt-2 text-2xl font-semibold tnum">
                 {data.stats.habitCheckins}
                 <span className="text-sm font-normal text-faint"> 次</span>
-              </div>
+              </dd>
             </div>
-            <div className="card p-4">
-              <div className="text-xs text-muted">平均心情</div>
-              <div className="mt-1 text-xl font-semibold tnum">
+            <div className="bg-surface p-4 sm:p-5">
+              <dt className="text-xs text-muted">平均心情</dt>
+              <dd className="mt-2 text-2xl font-semibold tnum">
                 {data.stats.avgMood !== null ? data.stats.avgMood.toFixed(1) : "--"}
                 <span className="text-sm font-normal text-faint">/5</span>
-              </div>
+              </dd>
             </div>
-          </div>
+          </dl>
 
           {shownDays.length === 0 ? (
-            <p className="py-8 text-center text-xs text-faint">本{period === "week" ? "周" : "月"}暂无记录</p>
+            <EmptyState title={`本${period === "week" ? "周" : "月"}暂无记录`} description="完成任务、写下复盘或打卡后，会在这里汇总。" />
           ) : (
             <div className="space-y-3">
               {shownDays.map((d) => {
@@ -473,7 +500,7 @@ function PeriodReview({ period }: { period: "week" | "month" }) {
 
                 return (
                   <section key={d} className="card p-5">
-                    <div className="mb-2 flex items-baseline justify-between">
+                    <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
                       <h2 className="text-sm font-semibold tnum">
                         {format(parseISO(d), "M月d日")} 周{weekdayCn(d)}
                       </h2>
@@ -487,19 +514,19 @@ function PeriodReview({ period }: { period: "week" | "month" }) {
                     ) : (
                       <div className="space-y-1.5">
                         {done.map((t) => (
-                          <div key={t.id} className="flex items-center gap-2 text-sm">
-                            <Check size={13} className="shrink-0 text-ink" />
-                            <span>{t.title}</span>
+                          <div key={t.id} className="flex items-start gap-2 text-sm leading-6">
+                            <Check size={13} className="mt-1.5 shrink-0 text-ink" />
+                            <span className="min-w-0 break-words">{t.title}</span>
                           </div>
                         ))}
                         {undone.map((t) => (
-                          <div key={t.id} className="flex items-center gap-2 text-sm text-faint">
-                            <span className="h-3 w-3 shrink-0 rounded-full border border-line" />
-                            <span className="line-through">{t.title}</span>
+                          <div key={t.id} className="flex items-start gap-2 text-sm leading-6 text-muted">
+                            <span className="mt-1.5 h-3 w-3 shrink-0 rounded-full border border-line" />
+                            <span className="min-w-0 break-words line-through">{t.title}</span>
                           </div>
                         ))}
                         {review?.summary && (
-                          <p className="mt-2 rounded-lg bg-bg px-3 py-2 text-xs text-muted">
+                          <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-bg px-3 py-3 text-sm leading-6 text-muted">
                             {review.summary}
                           </p>
                         )}

@@ -2,102 +2,81 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  LayoutGrid,
-  CheckSquare,
-  CalendarDays,
-  CalendarRange,
-  PenLine,
-  Lightbulb,
-  Rocket,
-  Target,
-  GraduationCap,
-  PanelLeftClose,
-  PanelLeftOpen,
-  ShieldCheck,
-} from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, ShieldCheck, X } from "lucide-react";
 import { useEffect, useState } from "react";
+import { NAV_ITEMS } from "@/lib/navigation";
 import Pomodoro from "./pomodoro";
 
-const NAV = [
-  { href: "/", label: "总览", icon: LayoutGrid },
-  { href: "/today", label: "今日待办", icon: CheckSquare },
-  { href: "/week", label: "本周清单", icon: CalendarRange },
-  { href: "/calendar", label: "日历", icon: CalendarDays },
-  { href: "/schedule", label: "课程表", icon: GraduationCap },
-  { href: "/habits", label: "习惯打卡", icon: Target },
-  { href: "/review", label: "复盘", icon: PenLine },
-  { href: "/inspiration", label: "灵感", icon: Lightbulb },
-  { href: "/launch", label: "开工", icon: Rocket },
-];
-
-export default function Sidebar() {
+export default function Sidebar({ collapsed, onToggle, mobileOpen, onNavigate }: {
+  collapsed: boolean; onToggle: () => void; mobileOpen: boolean; onNavigate: () => void;
+}) {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
+  const compact = collapsed && !mobileOpen;
 
   return (
     <aside
-      className={`flex h-full flex-col border-r border-line bg-surface transition-all duration-200 ${
-        collapsed ? "w-16" : "w-56"
-      }`}
+      id="app-navigation"
+      aria-label="主导航"
+      role={mobileOpen ? "dialog" : undefined}
+      aria-modal={mobileOpen ? true : undefined}
+      className={`app-sidebar ${mobileOpen ? "mobile-open" : ""}`}
     >
-      <div className="flex h-14 items-center justify-between px-4">
-        {!collapsed && (
-          <div className="flex items-center gap-2">
-            <span className="flex h-5 w-5 items-center justify-center rounded-md bg-ink text-[11px] font-semibold text-white">
-              工
-            </span>
-            <span className="text-[15px] font-semibold tracking-tight">人生工作台</span>
-          </div>
-        )}
+      <div className="sidebar-brand">
+        <Link href="/" aria-label="人生工作台总览" onClick={onNavigate} className="flex min-w-0 items-center gap-2.5">
+          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-ink text-xs font-semibold text-on-ink">工</span>
+          <span className="sidebar-label whitespace-nowrap text-[15px] font-semibold tracking-tight">人生工作台</span>
+        </Link>
         <button
-          onClick={() => setCollapsed((v) => !v)}
-          className="rounded-md p-1.5 text-muted hover:bg-bg hover:text-ink"
+          type="button"
+          onClick={onToggle}
+          className="sidebar-toggle hidden md:grid"
+          aria-label={collapsed ? "展开侧边栏" : "收起侧边栏"}
           title={collapsed ? "展开侧边栏" : "收起侧边栏"}
         >
           {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
+        <button type="button" onClick={onNavigate} className="sidebar-toggle md:hidden" aria-label="关闭导航"><X size={18} /></button>
       </div>
 
-      <nav className="flex-1 space-y-0.5 px-2 py-2">
-        {NAV.map(({ href, label, icon: Icon }) => {
+      <nav className="min-h-0 flex-1 space-y-1 px-3 pb-5 pt-3" aria-label="页面">
+        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
             <Link
               key={href}
               href={href}
               title={label}
-              className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-150 ${
-                active
-                  ? "bg-ink text-white font-medium shadow-sm"
-                  : "text-muted hover:bg-bg hover:text-ink active:scale-[0.98]"
-              } ${collapsed ? "justify-center px-0" : ""}`}
+              aria-label={label}
+              aria-current={active ? "page" : undefined}
+              onClick={onNavigate}
+              className={`nav-link ${active ? "is-active" : ""}`}
             >
-              <Icon size={17} strokeWidth={1.8} />
-              {!collapsed && <span>{label}</span>}
+              <Icon size={18} className="shrink-0" />
+              <span className="sidebar-label">{label}</span>
             </Link>
           );
         })}
       </nav>
 
       {/* 番茄钟（侧边栏内嵌） */}
-      <Pomodoro collapsed={collapsed} onExpand={() => setCollapsed(false)} />
+      <Pomodoro collapsed={compact} onExpand={onToggle} />
 
       {/* 桌面版设置：开机自启 */}
-      {!collapsed && <AutoLaunchToggle />}
+      {!compact && <div className="sidebar-extra"><AutoLaunchToggle /></div>}
 
       <Link
         href="/settings"
         title="数据与备份"
-        className={`mx-2 mb-3 flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${pathname === "/settings" ? "bg-bg font-medium text-ink" : "text-muted hover:bg-bg hover:text-ink"} ${collapsed ? "justify-center px-0" : ""}`}
+        aria-label="数据与备份"
+        aria-current={pathname === "/settings" ? "page" : undefined}
+        onClick={onNavigate}
+        className={`nav-link mx-3 mb-3 ${pathname === "/settings" ? "is-active" : ""}`}
       >
         <ShieldCheck size={17} strokeWidth={1.8} />
-        {!collapsed && <span>数据与备份</span>}
+        <span className="sidebar-label">数据与备份</span>
       </Link>
 
-      {!collapsed && (
-        <div className="px-5 pb-5 text-[11px] text-faint">本地优先 · 数据不上云</div>
-      )}
+      <div className="sidebar-label px-5 pb-5 text-[11px] text-muted">本地优先 · 数据不上云</div>
     </aside>
   );
 }
@@ -124,7 +103,7 @@ function AutoLaunchToggle() {
   const isDesktop = typeof window !== "undefined" && !!window.workbench?.isDesktop;
 
   useEffect(() => {
-    if (isDesktop) window.workbench!.getAutoLaunch().then(setEnabled);
+    if (isDesktop) window.workbench!.getAutoLaunch().then(setEnabled).catch(() => setEnabled(null));
   }, [isDesktop]);
 
   if (!isDesktop || enabled === null) return null;
@@ -133,12 +112,16 @@ function AutoLaunchToggle() {
     <div className="mx-4 mb-3 flex items-center justify-between rounded-lg border border-line px-3 py-2">
       <span className="text-xs text-muted">开机自启动</span>
       <button
+        type="button"
+        role="switch"
+        aria-label="开机自启动"
+        aria-checked={enabled}
         onClick={async () => setEnabled(await window.workbench!.setAutoLaunch(!enabled))}
         className={`h-4.5 w-8 rounded-full p-0.5 transition-colors ${enabled ? "bg-ink" : "bg-line"}`}
         style={{ height: 18 }}
       >
         <span
-          className={`block h-3.5 w-3.5 rounded-full bg-white transition-transform ${
+          className={`block h-3.5 w-3.5 rounded-full bg-surface transition-transform ${
             enabled ? "translate-x-3.5" : "translate-x-0"
           }`}
         />
