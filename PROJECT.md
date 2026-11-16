@@ -21,7 +21,7 @@
 | 样式 | Tailwind CSS 4（自定义工具类见 `app/globals.css`：`.card` `.btn-primary` `.btn-ghost` `.input` `.tnum` 等） |
 | 数据库 | SQLite，经 **@libsql/client** 访问（注意：不是 better-sqlite3，原因见 §7） |
 | ORM | Drizzle ORM + drizzle-kit（迁移文件在 `db/migrations/`） |
-| 桌面壳 | Electron 37 + electron-builder（NSIS 安装包） |
+| 桌面壳 | Electron 37.10.3 + electron-builder 26.15.3（NSIS 安装包） |
 | 日期 | date-fns |
 | 图标 | lucide-react |
 
