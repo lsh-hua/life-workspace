@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useSearchParams } from "next/navigation";
+import Link from "next/link";
 import { api } from "@/lib/api";
 import type { Event, Task } from "@/db/schema";
 import { PageError, PageHeader, PageLoading } from "@/components/page-header";
 import { WEEKDAY_CN, fmtDate, todayStr } from "@/lib/dates";
+import { recordTarget, type RecordTarget } from "@/lib/record-links";
 import {
   addDays,
   addMonths,
@@ -24,7 +27,12 @@ async function readCalendar(signal?: AbortSignal) {
     api<Task[]>("/api/tasks", { signal }),
     api<Event[]>("/api/events", { signal }),
   ]);
-  return { tasks: tasks.filter((task) => task.dueDate), events };
+  return { tasks: tasks.filter((task) => task.plannedDate || task.dueDate), events };
+}
+
+function taskDateLabel(task: Task, date: string) {
+  if (task.plannedDate === date && task.dueDate === date) return "计划 / 截止";
+  return task.plannedDate === date ? "计划" : "截止";
 }
 
 function eventStyle(color: string | null) {
@@ -37,37 +45,62 @@ function eventStyle(color: string | null) {
 }
 
 export default function CalendarPage() {
-  const [cursor, setCursor] = useState(new Date());
+  return <Suspense fallback={<div className="page-shell page-shell-wide"><PageLoading rows={6} /></div>}><CalendarRoute /></Suspense>;
+}
+
+function CalendarRoute() {
+  const params = useSearchParams();
+  return <CalendarContent key={params.toString()} target={recordTarget(params, "events")} />;
+}
+
+function CalendarContent({ target }: { target: RecordTarget }) {
+  const initialDate = !target.invalid ? target.date : null;
+  const [cursor, setCursor] = useState(() => initialDate ? new Date(`${initialDate}T00:00:00`) : new Date());
   const [mode, setMode] = useState<Mode>("month");
   const [tasks, setTasks] = useState<Task[]>([]);
   const [events, setEvents] = useState<Event[]>([]);
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(initialDate);
   const [newEvent, setNewEvent] = useState({ title: "", startTime: "" });
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const details = useRef<HTMLElement>(null);
+  const locatedEvent = useRef<HTMLDivElement>(null);
+  const loadRevision = useRef(0);
+  const targetEvent = !target.invalid && target.id ? events.find((event) => event.id === target.id) : undefined;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const revision = ++loadRevision.current;
     try {
-      const data = await readCalendar();
+      const data = await readCalendar(signal);
+      if (signal?.aborted || revision !== loadRevision.current) return;
       setTasks(data.tasks);
       setEvents(data.events);
       setLoaded(true);
       setError(null);
     } catch {
-      setError("日历数据读取失败，请重新加载。");
+      if (!signal?.aborted && revision === loadRevision.current) setError("日历数据读取失败，请重新加载。");
     } finally {
-      setLoading(false);
+      if (!signal?.aborted && revision === loadRevision.current) setLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    const refresh = () => { void load(); };
+    window.addEventListener("workbench:records-changed", refresh);
+    return () => window.removeEventListener("workbench:records-changed", refresh);
+  }, [load]);
   useEffect(() => {
     const controller = new AbortController();
+    const revision = ++loadRevision.current;
     readCalendar(controller.signal)
-      .then((data) => { setTasks(data.tasks); setEvents(data.events); setLoaded(true); })
-      .catch(() => { if (!controller.signal.aborted) setError("日历数据读取失败，请重新加载。"); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+      .then((data) => {
+        if (controller.signal.aborted || revision !== loadRevision.current) return;
+        setTasks(data.tasks); setEvents(data.events); setLoaded(true);
+      })
+      .catch(() => { if (!controller.signal.aborted && revision === loadRevision.current) setError("日历数据读取失败，请重新加载。"); })
+      .finally(() => { if (!controller.signal.aborted && revision === loadRevision.current) setLoading(false); });
     return () => controller.abort();
   }, []);
 
@@ -77,7 +110,13 @@ export default function CalendarPage() {
     if (window.matchMedia("(max-width: 1535px)").matches) {
       details.current.scrollIntoView({ behavior: "auto", block: "nearest" });
     }
-  }, [selected]);
+  }, [selected, loaded]);
+
+  useEffect(() => {
+    if (!loaded || !targetEvent || selected !== targetEvent.date) return;
+    locatedEvent.current?.focus({ preventScroll: true });
+    locatedEvent.current?.scrollIntoView({ behavior: "auto", block: "nearest" });
+  }, [loaded, selected, targetEvent]);
 
   const days = useMemo(() => {
     if (mode === "week") {
@@ -91,7 +130,7 @@ export default function CalendarPage() {
     return arr;
   }, [cursor, mode]);
 
-  const tasksOn = (d: string) => tasks.filter((t) => t.dueDate === d);
+  const tasksOn = (d: string) => tasks.filter((task) => task.plannedDate === d || task.dueDate === d);
   const eventsOn = (d: string) => events.filter((e) => e.date === d);
 
   const nav = (dir: 1 | -1) =>
@@ -142,7 +181,12 @@ export default function CalendarPage() {
           </button>)}
         </div>} />
 
-      {error && <div className="mb-5"><PageError message={error} onRetry={load} /></div>}
+      {error && <div className="mb-5"><PageError message={error} onRetry={() => { void load(); }} /></div>}
+      {target.invalid && <p role="alert" className="mb-5 rounded-xl border border-line bg-surface p-4 text-sm text-muted">定位链接中的日期或记录编号无效，请重新搜索。</p>}
+      {loaded && !target.invalid && target.id && !targetEvent && <p role="status" className="mb-5 rounded-xl border border-line bg-surface p-4 text-sm text-muted">未找到这条日程，记录可能已删除。可以重新搜索或浏览当天安排。</p>}
+      {targetEvent && targetEvent.date !== target.date && <div role="status" className="mb-5 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-4 text-sm text-muted">
+        <span>这条日程已改到 {targetEvent.date}。</span><button type="button" className="btn-ghost" onClick={() => { setSelected(targetEvent.date); setCursor(new Date(`${targetEvent.date}T00:00:00`)); }}>查看当前日期</button>
+      </div>}
       {loading ? <PageLoading rows={6} /> : loaded && <div className={`grid min-w-0 gap-5 ${selected ? "2xl:grid-cols-[minmax(0,1fr)_20rem]" : ""}`}>
       <section className="min-w-0" aria-label="日期选择">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -215,7 +259,7 @@ export default function CalendarPage() {
                         t.status === "done" ? "line-through" : ""
                       }`}
                     >
-                      {t.title}
+                      {taskDateLabel(t, ds)} · {t.title}
                     </div>
                   ))}
                   {hidden > 0 && (
@@ -247,7 +291,7 @@ export default function CalendarPage() {
           <h3 className="mb-3 text-xs font-semibold text-muted">日程</h3>
           <div className="mb-3 space-y-1.5">
             {eventsOn(selected).map((e) => (
-              <div key={e.id} className="flex items-start gap-2 rounded-xl border border-line py-2 pl-3 pr-2 text-sm" style={eventStyle(e.color)}>
+              <div key={e.id} ref={e.id === targetEvent?.id ? locatedEvent : null} tabIndex={e.id === targetEvent?.id ? -1 : undefined} className={`flex scroll-mt-5 items-start gap-2 rounded-xl border border-line py-2 pl-3 pr-2 text-sm focus:outline-none ${e.id === targetEvent?.id ? "ring-2 ring-accent" : ""}`} style={eventStyle(e.color)}>
                 <div className="min-w-0 flex-1">
                   <p className="break-words leading-6">{e.title}</p>
                   <span className="text-xs text-muted tnum">{e.startTime || "全天"}</span>
@@ -297,9 +341,9 @@ export default function CalendarPage() {
           <div className="space-y-1.5">
             {tasksOn(selected).map((t) => (
               <div key={t.id} className="flex items-start gap-2 rounded-xl border border-line px-3 py-3 text-sm">
-                <span className={`min-w-0 flex-1 break-words leading-6 ${t.status === "done" ? "text-muted line-through" : ""}`}>
-                  {t.title}
-                </span>
+                <div className="min-w-0 flex-1"><Link href={`/tasks/${t.id}`} className={`block break-words leading-6 hover:text-accent hover:underline ${t.status === "done" ? "text-muted line-through" : ""}`}>{t.title}</Link>
+                  <p className="mt-1 text-[11px] text-muted">{taskDateLabel(t, selected)}</p>
+                </div>
                 <span className="shrink-0 text-[11px] text-muted">{t.status === "done" ? "已完成" : "待完成"}</span>
               </div>
             ))}

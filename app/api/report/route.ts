@@ -3,6 +3,7 @@ import { db, schema } from "@/db";
 import { and, asc, eq, gte, lte } from "drizzle-orm";
 import { addWeeks, addMonths, startOfMonth, endOfMonth, format } from "date-fns";
 import { weekDates, weekRangeLabel, fmtDate } from "@/lib/dates";
+import { taskPeriodWhere, taskScheduleDate } from "@/lib/task-query";
 
 // GET /api/report?period=week|month&offset=0
 // period=week: offset=0 本周，-1 上周；period=month: offset=0 本月，-1 上月
@@ -27,8 +28,8 @@ export async function GET(req: NextRequest) {
   const tasks = await db
     .select()
     .from(schema.tasks)
-    .where(and(gte(schema.tasks.dueDate, start), lte(schema.tasks.dueDate, end)))
-    .orderBy(asc(schema.tasks.dueDate));
+    .where(taskPeriodWhere(schema.tasks, start, end))
+    .orderBy(asc(taskScheduleDate(schema.tasks)));
 
   const reviews = await db
     .select()

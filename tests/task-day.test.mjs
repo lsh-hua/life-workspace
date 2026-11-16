@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import test, { after } from "node:test";
 import { createClient } from "@libsql/client";
 import { drizzle } from "drizzle-orm/libsql";
@@ -19,8 +19,10 @@ async function withTasks(rows, run) {
   const client = createClient({ url: "file::memory:" });
   const database = drizzle(client);
   try {
-    const migration = await readFile(new URL("../db/migrations/0000_legal_mulholland_black.sql", import.meta.url), "utf8");
-    await client.executeMultiple(migration);
+    const directory = new URL("../db/migrations/", import.meta.url);
+    for (const file of (await readdir(directory)).filter((name) => name.endsWith(".sql")).sort()) {
+      await client.executeMultiple(await readFile(new URL(file, directory), "utf8"));
+    }
     if (rows.length) {
       await database.insert(tasks).values(rows.map((row) => ({ createdAt: "2026-10-01T00:00:00.000Z", ...row })));
     }

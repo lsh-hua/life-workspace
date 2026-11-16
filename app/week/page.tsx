@@ -1,11 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { api } from "@/lib/api";
+import Link from "next/link";
 import type { Task } from "@/db/schema";
+import TaskEditor from "@/components/task-editor";
+import TaskUndoNotice from "@/components/task-undo-notice";
+import { useTaskResource } from "@/components/use-task-resource";
 import { PageError, PageHeader, PageLoading } from "@/components/page-header";
 import { WEEKDAY_CN, todayStr, weekDates, weekRangeLabel } from "@/lib/dates";
-import { Check, GripVertical, Plus } from "lucide-react";
+import { Check, GripVertical, Pencil, Plus, Timer, Trash2 } from "lucide-react";
+import TaskScheduleMeta, { TaskRepeatCompletionNotice } from "@/components/task-schedule-meta";
 import {
   DndContext,
   PointerSensor,
@@ -86,12 +91,14 @@ function DayColumn({
   );
 }
 
-function DraggableCard({ task, days, disabled, onToggle, onMove }: {
+function DraggableCard({ task, days, disabled, onToggle, onMove, onEdit, onDelete }: {
   task: Task;
   days: string[];
   disabled: boolean;
   onToggle: (t: Task) => void;
   onMove: (task: Task, date: string) => void;
+  onEdit: (task: Task) => void;
+  onDelete: (task: Task) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: task.id,
@@ -123,15 +130,21 @@ function DraggableCard({ task, days, disabled, onToggle, onMove }: {
         >
           {done && <Check size={10} strokeWidth={3.5} />}
         </button>
-        <span className={`min-w-0 break-words text-xs leading-6 ${done ? "text-muted line-through" : ""}`}>{task.title}</span>
+        <Link href={`/tasks/${task.id}`} className={`min-w-0 break-words text-xs leading-6 hover:text-accent hover:underline ${done ? "text-muted line-through" : ""}`}>{task.title}</Link>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-2 gap-y-1 text-[11px] leading-5"><TaskScheduleMeta task={task} /></div>
+      <div className="mt-2 flex justify-end gap-1">
+        {!done && <button type="button" disabled={disabled} onClick={() => window.dispatchEvent(new CustomEvent("workbench:start-focus", { detail: { taskId: task.id } }))} aria-label={`开始专注：${task.title}`} title="开始专注" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-accent"><Timer size={13} /></button>}
+        <button type="button" disabled={disabled} onClick={() => onEdit(task)} aria-label={`编辑任务：${task.title}`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface hover:text-ink"><Pencil size={13} /></button>
+        <button type="button" disabled={disabled} onClick={() => onDelete(task)} aria-label={`删除任务：${task.title}`} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-danger/10 hover:text-danger"><Trash2 size={13} /></button>
       </div>
       <div className="mt-2 flex items-end gap-2">
         <button type="button" {...attributes} {...listeners} disabled={disabled}
           className="flex h-7 w-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-lg text-muted hover:bg-surface active:cursor-grabbing"
           aria-label={`拖动任务调整日期：${task.title}`}><GripVertical size={14} /></button>
         <div className="min-w-0 flex-1">
-          <label htmlFor={`week-move-${task.id}`} className="mb-1 block text-[11px] text-muted">安排日期</label>
-          <select id={`week-move-${task.id}`} value={task.dueDate ?? ""} disabled={disabled}
+          <label htmlFor={`week-move-${task.id}`} className="mb-1 block text-[11px] text-muted">计划日期</label>
+          <select id={`week-move-${task.id}`} value={task.plannedDate ?? task.dueDate ?? ""} disabled={disabled}
             aria-label={`调整任务日期：${task.title}`}
             onChange={(event) => onMove(task, event.target.value)}
             className="min-h-8 w-full min-w-0 rounded-lg border border-line bg-surface px-1.5 text-[11px] text-muted outline-none focus:border-accent">
@@ -144,33 +157,14 @@ function DraggableCard({ task, days, disabled, onToggle, onMove }: {
 }
 
 export default function WeekPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const { data: tasks, setData: setTasks, loading, loaded, error, setError, refresh: load } = useTaskResource<Task[]>("/api/tasks?filter=week", [], "week", "本周任务读取失败，请重新加载。");
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<Task | null>(null);
+  const [deleted, setDeleted] = useState<Task[]>([]);
+  const [updated, setUpdated] = useState<Task | null>(null);
+  const [completedRepeat, setCompletedRepeat] = useState<Task | null>(null);
   const days = weekDates();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
-
-  const load = useCallback(async () => {
-    try {
-      setTasks(await api<Task[]>("/api/tasks?filter=week"));
-      setLoaded(true);
-      setError(null);
-    } catch {
-      setError("本周任务读取失败，请重新加载。");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  useEffect(() => {
-    const controller = new AbortController();
-    api<Task[]>("/api/tasks?filter=week", { signal: controller.signal })
-      .then((rows) => { setTasks(rows); setLoaded(true); })
-      .catch(() => { if (!controller.signal.aborted) setError("本周任务读取失败，请重新加载。"); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, []);
 
   const runAction = async (action: () => Promise<unknown>, message: string) => {
     if (busy) return false;
@@ -179,6 +173,7 @@ export default function WeekPage() {
     try {
       await action();
       await load();
+      window.dispatchEvent(new CustomEvent("workbench:records-changed", { detail: { source: "week" } }));
       return true;
     } catch {
       setError(message);
@@ -189,21 +184,32 @@ export default function WeekPage() {
   };
 
   const add = async (date: string, title: string) => {
-    return runAction(() => api("/api/tasks", { method: "POST", json: { title, dueDate: date } }), "任务添加失败，输入已保留，请重试。");
+    return runAction(() => api("/api/tasks", { method: "POST", json: { title, plannedDate: date } }), "任务添加失败，输入已保留，请重试。");
   };
 
   const toggle = async (t: Task) => {
-    await runAction(() => api(`/api/tasks/${t.id}`, {
+    const saved = await runAction(() => api(`/api/tasks/${t.id}`, {
       method: "PATCH",
       json: { status: t.status === "done" ? "todo" : "done" },
     }), "任务状态没有保存，请重试。");
+    if (saved) setCompletedRepeat(t.status === "done" ? null : t);
+  };
+
+  const remove = async (task: Task) => {
+    const saved = await runAction(() => api(`/api/tasks/${task.id}`, { method: "DELETE" }), "任务删除失败，请重试。");
+    if (saved) setDeleted((items) => [task, ...items.filter((item) => item.id !== task.id)]);
+  };
+
+  const restore = async (task: Task) => {
+    const saved = await runAction(() => api(`/api/tasks/${task.id}`, { method: "PATCH", json: { action: "restore" } }), "任务恢复失败，请重试。");
+    if (saved) setDeleted((items) => items.filter((item) => item.id !== task.id));
   };
 
   const moveTask = async (task: Task, date: string) => {
-    if (busy || !days.includes(date) || task.dueDate === date) return;
+    if (busy || !days.includes(date) || (task.plannedDate ?? task.dueDate) === date) return;
     const previous = tasks;
-    setTasks(tasks.map((item) => item.id === task.id ? { ...item, dueDate: date } : item));
-    const saved = await runAction(() => api(`/api/tasks/${task.id}`, { method: "PATCH", json: { dueDate: date } }), "任务日期没有保存，已恢复原安排。");
+    setTasks(tasks.map((item) => item.id === task.id ? { ...item, plannedDate: date } : item));
+    const saved = await runAction(() => api(`/api/tasks/${task.id}`, { method: "PATCH", json: { plannedDate: date } }), "任务日期没有保存，已恢复原安排。");
     if (!saved) setTasks(previous);
   };
 
@@ -220,11 +226,14 @@ export default function WeekPage() {
 
   return (
     <div className="page-shell page-shell-wide">
-      <PageHeader title="本周清单" description="按天安排任务，拖动卡片或选择日期可调整计划。"
+      <PageHeader title="本周清单" description="按计划日期安排任务，拖动卡片只调整计划，保留原来的截止日期。未设计划日期的旧任务按截止日显示。"
         meta={<span className="tnum">{weekRangeLabel().replace(/[\u2013\u2014]/g, "-")}</span>}
-        actions={<span className="rounded-xl border border-line bg-surface px-4 py-2 text-sm text-muted tnum">{loaded ? <><strong className="font-medium text-ink">{done}/{tasks.length}</strong> 已完成</> : loading ? "正在读取…" : "暂不可用"}</span>} />
+        actions={<><Link href="/tasks/deleted" className="btn-ghost">最近删除</Link><span className="rounded-xl border border-line bg-surface px-4 py-2 text-sm text-muted tnum">{loaded ? <><strong className="font-medium text-ink">{done}/{tasks.length}</strong> 已完成</> : loading ? "正在读取…" : "暂不可用"}</span></>} />
 
       {error && <div className="mb-5"><PageError message={error} onRetry={load} /></div>}
+      {updated && <p role="status" className="mb-5 break-words text-sm text-muted">任务已保存。<Link href={`/tasks/${updated.id}`} className="ml-2 text-accent hover:underline">查看“{updated.title}”</Link></p>}
+      <TaskUndoNotice tasks={deleted} busy={busy} onRestore={restore} />
+      <TaskRepeatCompletionNotice task={completedRepeat} />
       {loading ? <PageLoading rows={7} /> : loaded &&
 
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
@@ -235,15 +244,16 @@ export default function WeekPage() {
               date={date}
               label={WEEKDAY_CN[i]}
               isTodayCol={date === todayStr()}
-              tasks={tasks.filter((t) => t.dueDate === date)}
+              tasks={tasks.filter((t) => (t.plannedDate ?? t.dueDate) === date)}
               onAdd={add}
               disabled={busy}
             >
-              {(t) => <DraggableCard key={t.id} task={t} days={days} disabled={busy} onToggle={toggle} onMove={moveTask} />}
+              {(t) => <DraggableCard key={t.id} task={t} days={days} disabled={busy} onToggle={toggle} onMove={moveTask} onEdit={setEditing} onDelete={remove} />}
             </DayColumn>
           ))}
         </div>
       </DndContext>}
+      {editing && <TaskEditor key={editing.id} task={editing} onClose={() => setEditing(null)} onSaved={(saved) => { setUpdated(saved); setEditing(null); }} />}
     </div>
   );
 }

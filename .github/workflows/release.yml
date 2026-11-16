@@ -1,0 +1,93 @@
+name: 发布 Windows 桌面版
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - name: 检出源码
+        uses: actions/checkout@v4
+
+      - name: 配置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 校验标签与发布版本
+        shell: pwsh
+        run: |
+          $tagVersion = $env:GITHUB_REF_NAME.Substring(1)
+          $rootVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $desktopVersion = (Get-Content desktop-app/package.json -Raw | ConvertFrom-Json).version
+          if ($rootVersion -ne $desktopVersion -or $rootVersion -ne $tagVersion) {
+            throw "标签、根 package.json 与桌面 package.json 版本必须一致。"
+          }
+          if (-not (Select-String -Path CHANGELOG.md -Pattern "^## \[$([regex]::Escape($rootVersion))\]" -Quiet)) {
+            throw "CHANGELOG.md 缺少版本 $rootVersion 的条目。"
+          }
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 运行领域与数据安全回归
+        run: npm test
+
+      - name: 检查代码规范
+        run: npm run lint
+
+      - name: 检查 TypeScript
+        run: npx tsc --noEmit --incremental false
+
+      - name: 构建 Windows 安装包
+        run: npm run dist
+
+      - name: 验收打包版 API
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem desktop-app/release -Filter '人生工作台 Setup *.exe' -Recurse |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+          if (-not $installer) { throw "没有找到 Windows 安装包。" }
+          $appDir = Join-Path $installer.DirectoryName 'win-unpacked'
+          if (-not (Test-Path (Join-Path $appDir '人生工作台.exe'))) {
+            throw "安装包目录中缺少 win-unpacked 应用。"
+          }
+          $env:WORKBENCH_PACKAGED_APP = $appDir
+          "RELEASE_INSTALLER=$($installer.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          npm run test:integration
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:restore:packaged
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: 准备校验和清单
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME.Substring(1)
+          $source = $env:RELEASE_INSTALLER
+          $staging = Join-Path $env:RUNNER_TEMP "release-$version"
+          New-Item -ItemType Directory -Path $staging -Force | Out-Null
+          $installer = Join-Path $staging "Setup.$version.exe"
+          Copy-Item -LiteralPath $source -Destination $installer
+          $hash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  Setup.$version.exe" | Set-Content -LiteralPath "$installer.sha256" -Encoding ascii
+          "RELEASE_STAGING=$staging" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: 创建 GitHub Release 并上传资产
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $version = $tag.Substring(1)
+          $installer = Join-Path $env:RELEASE_STAGING "Setup.$version.exe"
+          $checksum = "$installer.sha256"
+          gh release create $tag $installer $checksum --repo $env:GITHUB_REPOSITORY --verify-tag --generate-notes
+          if ($LASTEXITCODE -ne 0) { throw "上传 Release 资产失败。" }

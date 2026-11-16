@@ -92,7 +92,8 @@ test("升级前备份失败时不执行结构变更", (t) => scenario(t, async (
 test("全新临时库可应用仓库全部迁移并保持幂等", (t) => scenario(t, async (dataDir) => {
   const migrationsDir = process.env.WORKBENCH_TEST_MIGRATIONS_DIR;
   const result = await migrateDatabase({ dataDir, migrationsDir });
-  assert.equal(result.applied.length, 4);
+  const migrations = (await fs.readdir(migrationsDir)).filter((file) => file.endsWith(".sql"));
+  assert.equal(result.applied.length, migrations.length);
   assert.equal(result.backup, null);
   assert.deepEqual(await migrateDatabase({ dataDir, migrationsDir }), { applied: [], backup: null });
 }));

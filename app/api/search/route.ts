@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/db";
-import { like } from "drizzle-orm";
+import { and, isNull, like } from "drizzle-orm";
 
 // GET /api/search?q=xxx  跨表搜索
 export async function GET(req: NextRequest) {
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
     db
       .select({ id: schema.tasks.id, title: schema.tasks.title })
       .from(schema.tasks)
-      .where(like(schema.tasks.title, pattern))
+      .where(and(isNull(schema.tasks.deletedAt), like(schema.tasks.title, pattern)))
       .limit(8),
     db
       .select({ id: schema.events.id, title: schema.events.title, date: schema.events.date })

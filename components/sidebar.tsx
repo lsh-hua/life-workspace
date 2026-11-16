@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { PanelLeftClose, PanelLeftOpen, ShieldCheck, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { NAV_ITEMS } from "@/lib/navigation";
 import Pomodoro from "./pomodoro";
 
@@ -23,8 +23,8 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onNavigate }:
     >
       <div className="sidebar-brand">
         <Link href="/" aria-label="人生工作台总览" onClick={onNavigate} className="flex min-w-0 items-center gap-2.5">
-          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-ink text-xs font-semibold text-on-ink">工</span>
-          <span className="sidebar-label whitespace-nowrap text-[15px] font-semibold tracking-tight">人生工作台</span>
+          <span className="sidebar-mark">工</span>
+          <span className="sidebar-label sidebar-brand-text"><span>人生工作台</span><small>本地工作空间</small></span>
         </Link>
         <button
           type="button"
@@ -38,22 +38,24 @@ export default function Sidebar({ collapsed, onToggle, mobileOpen, onNavigate }:
         <button type="button" onClick={onNavigate} className="sidebar-toggle md:hidden" aria-label="关闭导航"><X size={18} /></button>
       </div>
 
-      <nav className="min-h-0 flex-1 space-y-1 px-3 pb-5 pt-3" aria-label="页面">
-        {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
+      <nav className="min-h-0 flex-1 space-y-1 px-3 pb-5 pt-1" aria-label="页面">
+        {NAV_ITEMS.map(({ href, label, icon: Icon }, index) => {
           const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
           return (
-            <Link
-              key={href}
-              href={href}
-              title={label}
-              aria-label={label}
-              aria-current={active ? "page" : undefined}
-              onClick={onNavigate}
-              className={`nav-link ${active ? "is-active" : ""}`}
-            >
-              <Icon size={18} className="shrink-0" />
-              <span className="sidebar-label">{label}</span>
-            </Link>
+            <Fragment key={href}>
+              {(index === 0 || index === 6) && <p className="sidebar-label sidebar-group-label">{index === 0 ? "计划与安排" : "记录与专注"}</p>}
+              <Link
+                href={href}
+                title={label}
+                aria-label={label}
+                aria-current={active ? "page" : undefined}
+                onClick={onNavigate}
+                className={`nav-link ${active ? "is-active" : ""}`}
+              >
+                <Icon size={18} className="shrink-0" />
+                <span className="sidebar-label">{label}</span>
+              </Link>
+            </Fragment>
           );
         })}
       </nav>
@@ -89,6 +91,20 @@ declare global {
       openPath: (p: string) => Promise<string>;
       getAutoLaunch: () => Promise<boolean>;
       setAutoLaunch: (v: boolean) => Promise<boolean>;
+      backups?: {
+        getRestoreInfo: () => Promise<{ supported: boolean; last: { retainedDirectory: string; restoredAt: string } | null }>;
+        restore: (name: string) => Promise<{ cancelled: boolean; error?: boolean }>;
+      };
+      quickAdd?: {
+        getState: () => Promise<{ shortcut: string; registered: boolean; error: string | null }>;
+        setShortcut: (shortcut: string) => Promise<{ shortcut: string; registered: boolean; error: string | null }>;
+        onOpen: (callback: () => void) => () => void;
+        drafts: {
+          getItem: () => string | null;
+          setItem: (value: string) => void;
+          removeItem: () => void;
+        };
+      };
       reviewDrafts?: {
         getItem: (key: string) => string | null;
         setItem: (key: string, value: string) => void;

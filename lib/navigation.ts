@@ -1,8 +1,9 @@
-import { CalendarDays, CalendarRange, CheckSquare, GraduationCap, LayoutGrid, Lightbulb, PenLine, Rocket, Target } from "lucide-react";
+import { CalendarDays, CalendarRange, CheckSquare, GraduationCap, LayoutGrid, Lightbulb, ListTodo, PenLine, Rocket, Target } from "lucide-react";
 
 export const NAV_ITEMS = [
   { href: "/", label: "总览", icon: LayoutGrid },
   { href: "/today", label: "今日待办", icon: CheckSquare },
+  { href: "/tasks", label: "全部任务", icon: ListTodo },
   { href: "/week", label: "本周清单", icon: CalendarRange },
   { href: "/calendar", label: "日历", icon: CalendarDays },
   { href: "/schedule", label: "课程表", icon: GraduationCap },
@@ -13,6 +14,8 @@ export const NAV_ITEMS = [
 ];
 
 export function pageLabel(pathname: string) {
+  if (pathname === "/tasks/deleted") return "最近删除";
+  if (pathname.startsWith("/tasks/")) return "任务详情";
   if (pathname === "/settings") return "数据与备份";
   return NAV_ITEMS.find((item) => item.href === "/" ? pathname === "/" : pathname.startsWith(item.href))?.label ?? "人生工作台";
 }

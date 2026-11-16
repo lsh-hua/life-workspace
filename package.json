@@ -1,6 +1,6 @@
 {
   "name": "life-workbench",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "scripts": {
     "dev": "node scripts/dev.mjs",
@@ -8,6 +8,7 @@
     "start": "next start",
     "test": "node --test --experimental-strip-types tests/*.test.mjs",
     "test:integration": "node --test --experimental-strip-types tests/desktop-api.integration.mjs",
+    "test:restore:packaged": "node --test tests/desktop-restore.integration.mjs",
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "node scripts/migrate.mjs",

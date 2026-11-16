@@ -1,7 +1,9 @@
 "use client";
 
 import type { Task } from "@/db/schema";
-import { Check, Trash2 } from "lucide-react";
+import Link from "next/link";
+import { Check, Pencil, Timer, Trash2 } from "lucide-react";
+import TaskScheduleMeta from "@/components/task-schedule-meta";
 
 const PRIORITIES: Record<string, { label: string; color: string }> = {
   high: { label: "高优先级", color: "var(--color-danger)" },
@@ -14,6 +16,7 @@ export default function TaskItem({
   overdue,
   onToggle,
   onDelete,
+  onEdit,
   dragHandle,
   disabled = false,
 }: {
@@ -21,6 +24,7 @@ export default function TaskItem({
   overdue?: boolean;
   onToggle: (t: Task) => void;
   onDelete: (t: Task) => void;
+  onEdit: (t: Task) => void;
   dragHandle?: React.ReactNode;
   disabled?: boolean;
 }) {
@@ -46,16 +50,21 @@ export default function TaskItem({
         {done && <Check size={13} strokeWidth={3} />}
       </button>
       <div className="min-w-0 flex-1">
-        <div className={`break-words text-sm leading-6 ${done ? "text-muted line-through" : ""}`}>{task.title}</div>
+        <Link href={`/tasks/${task.id}`} className={`block break-words text-sm leading-6 hover:text-accent hover:underline ${done ? "text-muted line-through" : ""}`}>{task.title}</Link>
         {task.note && (
           <div className="mt-0.5 line-clamp-2 break-words text-xs leading-5 text-muted">{task.note}</div>
         )}
         <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] leading-5">
           <span style={{ color: priority.color }}>{priority.label}</span>
+          <TaskScheduleMeta task={task} />
           {overdue && !done && <span className="text-danger">已逾期</span>}
           {done && <span className="text-muted">已完成</span>}
         </div>
       </div>
+      {!done && <button type="button" disabled={disabled} onClick={() => window.dispatchEvent(new CustomEvent("workbench:start-focus", { detail: { taskId: task.id } }))}
+        aria-label={`开始专注：${task.title}`} title="开始专注" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-bg hover:text-accent disabled:cursor-wait"><Timer size={14} /></button>}
+      <button type="button" onClick={() => onEdit(task)} disabled={disabled} aria-label={`编辑任务：${task.title}`}
+        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted hover:bg-bg hover:text-ink disabled:cursor-wait"><Pencil size={14} /></button>
       <button
         type="button"
         onClick={() => onDelete(task)}

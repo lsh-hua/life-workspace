@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/db";
-import { asc, eq } from "drizzle-orm";
+import { asc } from "drizzle-orm";
 import { nowIso } from "@/lib/dates";
 
 // GET /api/groups → 集合列表（含每个集合的条目）

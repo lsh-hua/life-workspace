@@ -182,3 +182,93 @@ test("下载接口不能读取原始数据库或穿越备份目录", async () =>
     assert.equal(response.status, 404);
   }
 });
+
+test("任务编辑、软删除和恢复保持原编号，并从常规查询与统计隐藏", async () => {
+  const title = "恢复流程专属任务";
+  const created = await request("/api/tasks", { title, note: "保留备注", dueDate: today, priority: "high", isToday: 1, sortOrder: 777 });
+  assert.equal(created.response.status, 201);
+  const id = created.data.id;
+  const patch = (body) => fetch(`${baseUrl}/api/tasks/${id}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const updated = await patch({ title: title + "已编辑", note: "新备注", priority: "low" });
+  assert.equal(updated.status, 200);
+  assert.equal((await updated.json()).note, "新备注");
+  await request("/api/pomodoros", { taskId: id, minutes: 25 });
+  const before = (await request("/api/overview")).data;
+  const removed = await fetch(`${baseUrl}/api/tasks/${id}`, { method: "DELETE" });
+  assert.equal(removed.status, 200);
+  const deleted = (await request(`/api/tasks/${id}`)).data;
+  assert.equal(deleted.id, id);
+  assert.ok(deleted.deletedAt);
+  assert.equal((await patch({ title: "不应保存" })).status, 409);
+  for (const query of ["", "?filter=today", "?filter=week", `?date=${today}`]) {
+    assert.ok(!(await request(`/api/tasks${query}`)).data.some((task) => task.id === id));
+  }
+  assert.ok((await request("/api/tasks?filter=deleted")).data.some((task) => task.id === id));
+  assert.equal((await request(`/api/search?q=${encodeURIComponent(title)}`)).data.tasks.length, 0);
+  assert.ok(!(await request("/api/report")).data.tasks.some((task) => task.id === id));
+  const afterDeletion = (await request("/api/overview")).data;
+  assert.equal(afterDeletion.today.total, before.today.total - 1);
+  assert.equal(afterDeletion.week.total, before.week.total - 1);
+  await request("/api/tasks/reorder", { ids: [id] });
+  assert.equal((await request(`/api/tasks/${id}`)).data.sortOrder, 777);
+  await fetch(`${baseUrl}/api/tasks/${id}`, { method: "DELETE" });
+  assert.equal((await request(`/api/tasks/${id}`)).data.deletedAt, deleted.deletedAt);
+
+  const restored = await patch({ action: "restore" });
+  assert.equal(restored.status, 200);
+  const row = await restored.json();
+  assert.deepEqual(row, { ...deleted, deletedAt: null });
+  assert.equal((await patch({ action: "restore" })).status, 200);
+  assert.ok((await request("/api/tasks")).data.some((task) => task.id === id));
+  const client = createClient({ url: `file:${path.join(dataDir, "workbench.db")}` });
+  try { assert.equal((await client.execute({ sql: "SELECT task_id FROM pomodoros WHERE task_id=?", args: [id] })).rows[0].task_id, id); }
+  finally { client.close(); }
+});
+
+test("任务接口对无效编号、空标题和错误日期返回明确错误", async () => {
+  for (const body of [{ title: " " }, { title: "任务", dueDate: "2026-02-30" }, { title: "任务", priority: "unknown" }]) {
+    assert.equal((await request("/api/tasks", body)).response.status, 400);
+  }
+  assert.equal((await request("/api/tasks/invalid")).response.status, 400);
+  assert.equal((await request("/api/tasks/999999999")).response.status, 404);
+  assert.equal((await request("/api/tasks?date=2026-02-30")).response.status, 400);
+  assert.equal((await request("/api/tasks/reorder", { ids: [1, 1] })).response.status, 400);
+});
+
+test("重复任务并发完成只创建一次后续记录，保留本次历史与日期间隔", async () => {
+  const rule = JSON.stringify({ frequency: "daily", basis: "schedule", anchorDate: today });
+  const deadline = new Date(`${today}T12:00:00`);
+  deadline.setDate(deadline.getDate() + 2);
+  const created = await request("/api/tasks", { title: "周期验收", note: "保留备注", plannedDate: today, dueDate: fmtDate(deadline), repeatRule: rule });
+  assert.equal(created.response.status, 201);
+  const id = created.data.id;
+  const complete = () => fetch(`${baseUrl}/api/tasks/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status: "done" }) });
+  const responses = await Promise.all([complete(), complete()]);
+  assert.ok(responses.every((response) => response.ok), `并发完成状态：${responses.map((response) => response.status).join(",")}`);
+  const rows = (await request("/api/tasks")).data;
+  const previous = rows.find((task) => task.id === id);
+  const next = rows.filter((task) => task.repeatParentId === id);
+  assert.equal(previous.status, "done");
+  assert.equal(next.length, 1);
+  const tomorrow = new Date(`${today}T12:00:00`);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  deadline.setDate(deadline.getDate() + 1);
+  assert.equal(next[0].plannedDate, fmtDate(tomorrow));
+  assert.equal(next[0].dueDate, fmtDate(deadline));
+  assert.equal(next[0].note, "保留备注");
+});
+
+test("复盘行动并发重复提交只创建一条，已删除记录不会被静默复活", async () => {
+  const body = { title: "复盘行动验收", source: "review", originKey: `review:${today}:${"a".repeat(64)}`, plannedDate: today };
+  const results = await Promise.all([request("/api/tasks", body), request("/api/tasks", body)]);
+  assert.ok(results.every(({ response }) => [200, 201].includes(response.status)));
+  assert.equal(results[0].data.id, results[1].data.id);
+  const id = results[0].data.id;
+  await fetch(`${baseUrl}/api/tasks/${id}`, { method: "DELETE" });
+  const repeated = await request("/api/tasks", body);
+  assert.equal(repeated.response.status, 200);
+  assert.equal(repeated.data.id, id);
+  assert.ok(repeated.data.deletedAt);
+});

@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { db, schema } from "@/db";
-import { and, asc, desc, eq, gte, lte } from "drizzle-orm";
+import { asc, desc, eq } from "drizzle-orm";
 import { todayStr, weekDates } from "@/lib/dates";
 import { localDayWindow, reviewStreak } from "@/lib/day-rules";
-import { todayTaskWhere } from "@/lib/task-query";
+import { taskPeriodWhere, todayTaskWhere } from "@/lib/task-query";
 
 // GET /api/overview  总览页聚合数据
 export async function GET() {
@@ -21,7 +21,7 @@ export async function GET() {
   const weekTasks = await db
     .select()
     .from(schema.tasks)
-    .where(and(gte(schema.tasks.dueDate, days[0]), lte(schema.tasks.dueDate, days[6])));
+    .where(taskPeriodWhere(schema.tasks, days[0], days[6]));
   const weekTotal = weekTasks.length;
   const weekDone = weekTasks.filter((t) => t.status === "done").length;
 

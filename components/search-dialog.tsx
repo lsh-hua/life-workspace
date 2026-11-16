@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ArrowUpRight, CalendarDays, CheckSquare, Lightbulb, PenLine, Search, SearchX, X } from "lucide-react";
 import { api } from "@/lib/api";
+import { recordHref } from "@/lib/record-links";
 
 type Result = {
   tasks: { id: number; title: string }[];
@@ -13,10 +14,10 @@ type Result = {
 };
 
 const GROUPS = [
-  { key: "tasks", label: "任务", href: "/today", icon: CheckSquare },
-  { key: "events", label: "日程", href: "/calendar", icon: CalendarDays },
-  { key: "inspirations", label: "灵感", href: "/inspiration", icon: Lightbulb },
-  { key: "reviews", label: "复盘", href: "/review", icon: PenLine },
+  { key: "tasks", label: "任务", icon: CheckSquare },
+  { key: "events", label: "日程", icon: CalendarDays },
+  { key: "inspirations", label: "灵感", icon: Lightbulb },
+  { key: "reviews", label: "复盘", icon: PenLine },
 ] as const;
 
 type SearchResponse = { query: string; result: Result | null; error: boolean };
@@ -79,6 +80,15 @@ function SearchContent({ onClose }: { onClose: () => void }) {
       className="fixed inset-x-4 top-[10dvh] m-0 mx-auto w-auto max-w-xl overflow-hidden rounded-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-overlay"
       onCancel={(event) => { event.preventDefault(); onClose(); }}
       onKeyDown={(event) => {
+        if ((event.key === "ArrowDown" || event.key === "ArrowUp") && (event.target as HTMLElement).hasAttribute("data-search-result")) {
+          event.preventDefault();
+          const results = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("[data-search-result]:not(:disabled)"));
+          const index = results.indexOf(event.target as HTMLButtonElement);
+          const next = event.key === "ArrowDown" ? Math.min(index + 1, results.length - 1) : index - 1;
+          if (next < 0) inputRef.current?.focus();
+          else results[next]?.focus();
+          return;
+        }
         if (event.key !== "Tab") return;
         const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>("button:not(:disabled), input:not(:disabled), a[href], [tabindex]:not([tabindex='-1'])"))
           .filter((element) => element.getClientRects().length > 0);
@@ -107,7 +117,7 @@ function SearchContent({ onClose }: { onClose: () => void }) {
             onKeyDown={(event) => {
               if (event.key === "ArrowDown") {
                 event.preventDefault();
-                dialogRef.current?.querySelector<HTMLButtonElement>("[data-search-result]")?.focus();
+                dialogRef.current?.querySelector<HTMLButtonElement>("[data-search-result]:not(:disabled)")?.focus();
               }
             }}
             placeholder="输入关键词"
@@ -139,21 +149,22 @@ function SearchContent({ onClose }: { onClose: () => void }) {
             <p className="mt-1 text-xs leading-6 text-muted">试试更短的关键词，或换一种说法。</p>
           </div>
         )}
-        {result && GROUPS.map(({ key, label, href, icon: Icon }) => {
+        {result && GROUPS.map(({ key, label, icon: Icon }) => {
           const items = result[key];
           if (!items.length) return null;
           return (
             <section key={key} aria-label={label} className="mb-3 last:mb-0">
               <h3 className="flex items-center gap-2 px-3 py-2 text-xs font-medium text-muted"><Icon size={14} />{label}<span className="tnum">{items.length}</span></h3>
-              {items.map((item) => (
-                <button key={`${key}-${item.id}`} type="button" data-search-result onClick={() => go(href)} className="group flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-bg">
+              {items.map((item) => {
+                const href = recordHref(key, item);
+                return <button key={`${key}-${item.id}`} type="button" data-search-result disabled={!href} onClick={() => { if (href) go(href); }} className="group flex min-h-11 w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-bg disabled:opacity-50">
                   <span className="min-w-0 flex-1">
                     <span className="line-clamp-2 break-words text-sm leading-6">{resultLabel(item)}</span>
                     {"date" in item && <span className="mt-0.5 block text-xs text-muted tnum">{item.date}</span>}
                   </span>
                   <ArrowUpRight size={15} className="shrink-0 text-faint group-hover:text-accent" aria-hidden="true" />
-                </button>
-              ))}
+                </button>;
+              })}
             </section>
           );
         })}

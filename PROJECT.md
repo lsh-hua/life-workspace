@@ -3,7 +3,7 @@
 > **给后续维护者（人或 AI 模型）**：本文档是理解本项目的唯一入口。读完本文档即可上手开发。
 > **维护约定：每次完成功能迭代、架构调整或发布新版本后，必须同步更新本文档与 CHANGELOG.md。**
 
-最后更新：2026-10-26 · 当前版本：**1.5.0**
+最后更新：2026-11-16 · 当前版本：**1.6.0**
 
 ---
 
@@ -11,7 +11,7 @@
 
 「人生工作台」是一个**单用户、本地优先**的极简个人工作台 Web 应用，同时打包为 Windows 桌面应用（Electron）。所有数据保存在本地 SQLite 文件中，不上云。
 
-界面布局：响应式侧边栏导航 + 顶部全局搜索 + 主内容区。设计语言：克制的编辑感与工具感，明暗主题共用语义色令牌，以字号、留白和分隔建立层级；手机使用可访问抽屉导航，桌面支持收起侧栏。
+界面布局：响应式侧边栏导航 + 顶部全局搜索 + 主内容区。设计语言：安静的个人工作空间，以墨绿为单一语义强调，明暗主题共用语义色令牌；侧栏按计划和记录分组，总览突出今日待办和安排。手机使用可访问抽屉导航，桌面支持收起侧栏。
 
 ## 2. 技术栈
 
@@ -56,6 +56,7 @@ npm.cmd run db:migrate     # 应用迁移（scripts/migrate.mjs）
 npm.cmd run dist           # 桌面版打包（见 §6，有坑）
 npm.cmd test               # 纯领域、保存队列及隔离数据库回归
 npm.cmd run test:integration # 生产构建后，自动启动临时库服务验证 REST API
+npm.cmd run test:restore:packaged # 指定 WORKBENCH_PACKAGED_APP 后验证包内恢复脚本
 ```
 
 ## 4. 目录结构
@@ -65,6 +66,7 @@ app/                  # Next.js 页面与 API 路由
   page.tsx            # 总览
   today/ week/ calendar/ habits/ review/ inspiration/ launch/ schedule/
   settings/           # 本地备份管理、下载和恢复步骤
+  tasks/              # 全部任务、详情编辑与最近删除恢复
   api/                # REST 接口（tasks events reviews inspirations habits
                       #   pomodoros courses sites groups overview search report hotspots backups）
 components/           # app-shell page-header sidebar topbar pomodoro search-dialog task-item
@@ -78,15 +80,18 @@ data/workbench.db     # 本地 SQLite 数据文件（用户数据，勿删）
 PROJECT.md            # 本文档
 CHANGELOG.md          # 版本历史
 PLAN.md               # 最初的产品规划（历史文档，仅供背景参考）
+USABILITY_RESEARCH.md # 使用流程调研、官方来源与候选改进（非已实现功能）
 ```
 
 ## 5. 数据库
 
 - 连接封装在 `db/index.ts`，支持 `WORKBENCH_DATA_DIR` 环境变量覆盖数据目录（桌面版用它指向用户数据目录）。
+- 桌面组装排除 standalone 内的顶层项目数据、构建与发布目录，并检查产物中不存在数据库文件。
 - 所有表：`tasks events reviews inspirations hotspots sites groups settings(KV) habits habit_logs pomodoros courses course_overrides`。
 - 课程提醒配置复用 `settings` KV：`courseReminderEnabled`、`courseReminderMinutes`、`coursePeriodStarts`；没有新增表或迁移。
 - 改表流程：改 `db/schema.ts` → `npm.cmd run db:generate` → `npm.cmd run db:migrate` → 构建验证。
 - **hotspots 表已停用但保留**（AI 热点模块下线时用户明确要求不丢数据），`/api/hotspots` 接口仍在。
+- 1.6.0 增加可空删除时间、计划日期、周期规则、前序任务和复盘来源键；普通查询排除已删除任务。迁移只增加字段与索引，沿用升级前快照流程。
 
 ### 5.1 备份与恢复
 
@@ -96,7 +101,7 @@ PLAN.md               # 最初的产品规划（历史文档，仅供背景参�
 - 迁移有待执行文件时，先生成升级快照；每个 SQL 文件与迁移记录在同一事务内提交。失败回滚该文件并中止桌面启动，已完成的前序迁移记录保持可识别。
 - 复盘未保存草稿独立于数据库快照：桌面保存在 `userData/drafts/`，不随随机服务端口改变；网页版保存在当前站点的 `localStorage`。
 
-恢复步骤：先下载所需备份并完全退出应用；将整个现有 `data` 文件夹改名留存（一起保留数据库及 WAL/SHM 日志）；在原位置新建 `data` 文件夹，复制选定备份并命名为 `workbench.db`；启动并核对记录。旧数据与旧备份仍保存在改名后的目录。切勿在应用运行时覆盖单个数据库文件。
+桌面版可在备份记录中选择“恢复”并确认：应用先关闭窗口和本地服务，校验所选备份、创建当前快照，将原数据目录整体保留，再切换并检查新库；中断时启动前按恢复记录处理。恢复后设置页可打开保留的旧目录。网页版仍按手动说明操作：下载备份、完全退出应用、整体改名现有 `data` 目录，再新建目录并将备份命名为 `workbench.db`。切勿在应用运行时覆盖数据库文件。
 
 ## 6. 桌面版打包（electron-builder 有坑）
 
@@ -133,6 +138,10 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 
 **1.5.0 构建与发布记录（2026-10-26）**：安装包位于 `desktop-app/release/1.5.0-20261026T115139721Z-1b9acd/`，`人生工作台 Setup 1.5.0.exe` 为 107,957,373 字节。SHA-256：`F6977FE925B0CE4298298464DDF85D86CB7AD11E5905BC2FA501610322D164EB`。已发布 [GitHub Release v1.5.0](https://github.com/lsh-hua/life-workspace/releases/tag/v1.5.0)，资产 `Setup.1.5.0.exe` 的大小与 SHA-256 均经核对。生产构建、TypeScript、目标 ESLint 与主进程语法检查通过；程序和托盘图标资源已随包；真实项目数据库 SHA-256 仍为 `A5E7389BDC504B259A08DB14970BBE3E5C96DA15E203B3D9B9D3A608B1434C2B`。
 
+**1.6.0 构建记录（2026-10-28）**：安装包位于 `desktop-app/release/1.6.0-20261028T072422797Z-1c35fe/`，`人生工作台 Setup 1.6.0.exe` 为 108,055,374 字节，SHA-256：`252C3C07BC4AC5707F5720BB59EE1A0616FE72912BFE5837100D60610E7598A8`。生产构建、全仓库 ESLint、TypeScript、68 项回归和 11 项包内 API 集成通过；1 项符号链接用例因 Windows 账户权限跳过。包内 Electron 运行时恢复测试通过；另在隔离的打包副本中自动确认恢复，验证原目录保留、服务重启及恢复后记录。真实项目数据库 SHA-256 保持不变。该版本尚未发布至 GitHub。
+
+**1.6.0 风格更新构建（2026-11-16）**：安装包位于 `desktop-app/release/1.6.0-20261116T090826607Z-b10cb9/`，`人生工作台 Setup 1.6.0.exe` 为 108,057,058 字节，SHA-256：`7E51412127B5BA3904196100FDB7DCD464CEAC9ABF210FA77616EB9135B919D4`。生产构建、ESLint、TypeScript、68 项回归、11 项包内 API 和包内恢复测试通过；1 项符号链接用例因 Windows 账户权限跳过。预览使用独立数据库；项目数据库哈希保持不变。该构建沿用 1.6.0 版本号，未发布至 GitHub。
+
 **发布产物清理（2026-10-26）**：1.5.0 验收后清理 1.2.1 至 1.4.1 的旧安装器、失败构建目录、旧 `win-unpacked`、打包 staging 与 Next 缓存；发布目录仅保留 1.5.0。源码、正在运行的桌面目录、用户数据和备份不在清理范围。
 
 **NSIS mmap 错误（2026-09-14 遇到）**：makensis 连续三次报 `Internal compiler error #12345: error creating mmap`，清理临时文件无效，疑与系统实时防护有关。绕过方案：改用 zip 目标 `npx.cmd electron-builder --win zip --prepackaged release/win-unpacked -c.directories.output=release`，产物为免安装便携包 `人生工作台-<版本>-win.zip`（解压即运行）。1.0.0 即以 zip 形式发布；日后机器环境变化后可重试 NSIS。
@@ -148,11 +157,11 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 
 ## 8. 功能现状
 
-### 已完成（1.5.0）
+### 已完成（1.6.0）
 
 - **全局界面**：响应式应用壳、桌面可收起侧栏、手机焦点受限导航抽屉、系统/明/暗主题，以及跨桌面随机端口保存的界面偏好
 - **总览** `/`：按任务、日程、习惯与灵感分层呈现，不重复列出今日任务；页面共享标题、加载、错误与空状态
-- **数据与备份** `/settings`：创建与下载完整快照，查看每日和升级备份，提供保留旧数据的恢复步骤
+- **数据与备份** `/settings`：创建与下载完整快照；桌面版可确认恢复，并保留恢复前完整目录与快照
 - **今日待办** `/today`、**本周清单** `/week`（拖拽排序并提供日期选择操作）、**日历** `/calendar`
 - **课程表** `/schedule`：周视图网格在窄屏内部滚动、第 N 周切换、单双周、单周微调（停课/调课）、学期设置，自动定位当前周；可配置节次时间与课前通知
 - **习惯打卡** `/habits`：12 周热力图、连续天数、新建/删除；总览页可一键打卡
@@ -160,6 +169,11 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 - **番茄钟**：左侧边栏内嵌面板，25 分钟倒计时（截止时间戳实现），可绑定任务，完成记录 + 系统通知；显示下一堂课并提示专注时间冲突
 - **开工** `/launch`：网站集合一键全开、本地文件（PDF 等）打开；桌面版侧边栏有开机自启动开关
 - **全局搜索**：Ctrl/⌘+K
+- **任务整理** `/tasks`：查看全部、未安排和已完成任务；详情可修改标题、备注、优先级、任意截止日期及今日标记
+- **误删恢复** `/tasks/deleted`：删除只移入最近删除，提供连续撤销和跨重启恢复，保留任务编号和专注关联
+- **快速记录**：顶栏或 Ctrl/⌘+Shift+空格创建任务、灵感；桌面支持可切换系统快捷键与托盘入口，未提交草稿原子保存在 userData，网页保存在 localStorage
+- **任务安排**：计划日与截止日独立；每日、工作日、每周或每月重复，完成后保留本次记录并生成下一次
+- **专注与复盘**：任务一键专注，结束后可完成任务、继续一轮或记录阻碍；复盘行动可确认后加入明日计划
 - **桌面运行**：单实例锁与重复启动聚焦；窗口大小、位置和最大化状态安全恢复
 - **应用更新**：手动查询 GitHub 最新公开发行版，显示新版本并打开发布页；不自动下载或覆盖安装
 
@@ -174,7 +188,7 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 
 - 第二次启动聚焦已有应用，避免多个内嵌服务同时访问同一本地 SQLite 数据库。
 - 窗口状态保存在 `userData/window-state.json`，原子替换；屏幕布局变化、损坏或越界时使用默认窗口，不写入业务数据库。
-- 番茄钟完成的崩溃恢复仍待解决幂等记账后再实现，避免恢复时重复生成专注记录。
+- 番茄钟完成恢复与幂等记账已在 1.5.0 实现，详见下节。
 
 ### 1.5.0 更新、计时与图标
 
@@ -184,6 +198,16 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 - SVG 是图标源，PNG 用于托盘，ICO 用于 Windows 可执行文件与安装器。
 - GitHub 已公开首个 Release v1.5.0；设置页版本检查可识别当前版本，后续发布更高版本后会显示更新提示。
 - 本次数据库变化只新增可空会话键与唯一索引；不更新或删除既有记录。
+
+### 1.6.0 日常操作
+
+- 今日、本周、全部任务和详情共用编辑器；计划日期与截止日期独立，重复任务按原计划或完成时间生成下一次。
+- 任务删除改为软删除并支持撤销、最近删除恢复，不重建任务，也不丢弃原有专注关联。
+- 搜索任务打开详情，日程定位对应日期并高亮，灵感定位具体条目；历史复盘展示只读定位卡，避免误写到今日。
+- 统一快速录入保留关闭前草稿，保存后自动刷新当前列表；桌面默认 Ctrl/⌘+Shift+空格，可在“数据与备份”更换预设组合或关闭，冲突保留原设置。
+- 任务可直接开始专注；复盘中的明日行动经确认生成计划任务，重复提交通过来源键去重；周复盘展示下一周日程和课程。
+- 桌面恢复先停止服务并创建完整快照，整体保留旧目录；恢复中断时启动前回退或完成检查。
+- `desktop-app/quick-add.cjs` 必须随主进程打包；构建脚本继续排除并扫描所有数据库文件。
 
 ### 1.3.0 保存与日期规则
 
@@ -204,15 +228,19 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
   - 新功能（向后兼容）→ 次版本 +1
   - 修复/小调整 → 修订号 +1
 - 每次发版：更新两处 version → 在 CHANGELOG.md 记录 → 重新打 exe（产物文件名自动带版本号）。
-- 历史：0.1.0 首个桌面版；0.2.0 集合版开工 + 开机自启；1.0.0 首个稳定交接版；1.1.0 课程表与三栏复盘；1.2.0 课程提醒与番茄钟联动；1.2.1 总览视觉重构；1.3.0 备份、安全迁移与保存可靠性；1.4.0 响应式界面与明暗主题；**1.4.1 桌面单实例与窗口恢复**。
+- 历史：0.1.0 首个桌面版；0.2.0 集合版开工 + 开机自启；1.0.0 首个稳定交接版；1.1.0 课程表与三栏复盘；1.2.0 课程提醒与番茄钟联动；1.2.1 总览视觉重构；1.3.0 备份、安全迁移与保存可靠性；1.4.0 响应式界面与明暗主题；1.4.1 桌面单实例与窗口恢复；1.5.0 更新检查、番茄钟恢复与专属图标；**1.6.0 任务与复盘操作、计划和恢复体验**。
 - 源码仓库：`https://github.com/lsh-hua/life-workspace`，默认分支 `main`。
 
 ## 10. 日后规划（候选方向，按用户意愿排序）
 
-1. 自动下载安装更新（需先发布 GitHub Release 并保留手动下载回退）
-2. 应用运行状态与窗口体验的进一步收敛
+使用体验的调研依据见 [USABILITY_RESEARCH.md](USABILITY_RESEARCH.md)。1.6.0 实现了首批任务操作、搜索与录入，以及计划日期、常见周期任务、专注复盘衔接和桌面恢复入口；更复杂的周期规则仍应依据实际使用需求评估。
 
-当前全仓库 ESLint 尚有既有 API 路由警告；前端改动页与共享组件已通过目标 lint 和 TypeScript 检查。
+1. 自动下载安装更新：评估代码签名、用户确认、失败回退与手动下载并存后再实施。
+2. 应用运行状态与窗口体验的进一步收敛。
+
+版本标签 `v*` 可触发 `.github/workflows/release.yml`：Windows CI 校验两处版本号和变更日志，运行回归、类型检查、生产打包及包内 API 验收，随后创建 GitHub Release 并上传安装器与 SHA-256 清单。该流程需要仓库 Actions 的 `contents: write` 权限；不会自动推送标签或触碰开发机用户数据库。
+
+全仓库 ESLint 与 TypeScript 检查作为发布前验证的一部分。
 
 ---
 

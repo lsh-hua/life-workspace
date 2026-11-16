@@ -47,16 +47,16 @@ fs.cpSync(standaloneSource, standalone, {
   recursive: true,
   filter(source) {
     const segments = path.relative(standaloneSource, source).split(path.sep);
-    return segments[0] !== "data";
+    return segments[0] !== "data" && segments[0] !== "desktop-build" && !(segments[0] === "desktop-app" && segments[1] === "release");
   },
 });
 fs.cpSync(path.join(root, ".next", "static"), path.join(standalone, ".next", "static"), { recursive: true });
 if (fs.existsSync(path.join(root, "public"))) {
   fs.cpSync(path.join(root, "public"), path.join(standalone, "public"), { recursive: true });
 }
-// 只排除顶层用户 data/（含备份）；保留 .next/server/app/api/backups 等代码目录。
+// 排除顶层用户数据和构建产物；保留 .next/server/app/api/backups 等代码目录。
 // 数据脚本放 server 根目录，复用其中的原生数据库依赖。
-for (const file of ["migrate.mjs", "backup.mjs", "data-safety.mjs"]) {
+for (const file of ["migrate.mjs", "backup.mjs", "data-safety.mjs", "restore-backup.mjs"]) {
   fs.copyFileSync(path.join(root, "scripts", file), path.join(standalone, file));
 }
 fs.cpSync(path.join(root, "db", "migrations"), path.join(standalone, "migrations"), { recursive: true });
@@ -84,7 +84,7 @@ fs.renameSync(electronExecutable, path.join(unpacked, "人生工作台.exe"));
 console.log("[4/5] 复制桌面入口与 server...");
 const targetApp = path.join(unpacked, "resources", "app");
 fs.mkdirSync(targetApp, { recursive: true });
-for (const file of ["main.cjs", "preload.cjs", "draft-store.cjs", "package.json", "icon.png", "icon.ico"]) {
+for (const file of ["main.cjs", "preload.cjs", "draft-store.cjs", "quick-add.cjs", "package.json", "icon.png", "icon.ico"]) {
   fs.copyFileSync(path.join(appDir, file), path.join(targetApp, file));
 }
 fs.cpSync(standalone, path.join(targetApp, "server"), { recursive: true });

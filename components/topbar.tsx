@@ -1,30 +1,43 @@
 "use client";
 
-import { Menu, Monitor, Moon, Search, Sun } from "lucide-react";
+import { Menu, Monitor, Moon, Plus, Search, Sun } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { pageLabel } from "@/lib/navigation";
 import type { ThemePreference } from "@/lib/ui-preferences";
 import SearchDialog from "./search-dialog";
+import QuickAddDialog from "./quick-add-dialog";
 
 export default function Topbar({ theme, onThemeChange, onOpenNavigation, navigationOpen }: {
   theme: ThemePreference; onThemeChange: (theme: ThemePreference) => void; onOpenNavigation: () => void; navigationOpen: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
   const pathname = usePathname();
   const closeSearch = useCallback(() => setOpen(false), []);
+  const closeQuickAdd = useCallback(() => setQuickAddOpen(false), []);
+  const openQuickAdd = useCallback(() => {
+    if (!document.querySelector("dialog[open]")) setQuickAddOpen(true);
+  }, []);
   const ThemeIcon = theme === "system" ? Monitor : theme === "dark" ? Moon : Sun;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.isComposing || document.querySelector("dialog[open]")) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setOpen(true);
       }
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.code === "Space") {
+        e.preventDefault();
+        openQuickAdd();
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [openQuickAdd]);
+
+  useEffect(() => window.workbench?.quickAdd?.onOpen(openQuickAdd), [openQuickAdd]);
 
   return (
     <header className="app-topbar">
@@ -44,6 +57,7 @@ export default function Topbar({ theme, onThemeChange, onOpenNavigation, navigat
           Ctrl K
         </kbd>
       </button>
+      <button type="button" onClick={openQuickAdd} className="btn-primary shrink-0 whitespace-nowrap px-3" aria-label="快速记录任务或灵感" aria-haspopup="dialog" aria-keyshortcuts="Control+Shift+Space Meta+Shift+Space" title="快速记录（Ctrl / ⌘ + Shift + 空格）"><Plus size={16} /><span className="hidden sm:inline">快速记录</span></button>
       <label className="theme-picker">
         <ThemeIcon size={15} aria-hidden="true" />
         <span className="sr-only">界面主题</span>
@@ -54,6 +68,7 @@ export default function Topbar({ theme, onThemeChange, onOpenNavigation, navigat
         </select>
       </label>
       <SearchDialog open={open} onClose={closeSearch} />
+      <QuickAddDialog open={quickAddOpen} onClose={closeQuickAdd} />
     </header>
   );
 }

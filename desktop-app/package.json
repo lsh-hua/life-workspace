@@ -1,6 +1,6 @@
 {
   "name": "life-workbench-desktop",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "private": true,
   "description": "本地优先的极简个人工作台",
   "author": "life-workbench",
@@ -15,6 +15,8 @@
     "files": [
       "main.cjs",
       "preload.cjs",
+      "draft-store.cjs",
+      "quick-add.cjs",
       "icon.png",
       "icon.ico"
     ],

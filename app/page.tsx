@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { ArrowRight, CalendarClock, Check, CheckCircle2, Circle, Flame, Lightbulb, Plus } from "lucide-react";
+import { ArrowRight, CalendarClock, CalendarDays, Check, CheckCircle2, Circle, Flame, Lightbulb, ListTodo, Plus, Target } from "lucide-react";
 import { api } from "@/lib/api";
 import { todayStr } from "@/lib/dates";
 import type { Event, Habit, HabitLog, Inspiration, Task } from "@/db/schema";
@@ -32,10 +32,16 @@ export default function OverviewPage() {
 
   useEffect(() => {
     let active = true;
-    fetchDashboard().then(([overview, habitData]) => {
-      if (active) { setData(overview); setHabits(habitData); }
-    }).catch(() => { if (active) setError("工作台读取失败，请重新加载。"); });
-    return () => { active = false; };
+    let request = 0;
+    const load = () => {
+      const revision = ++request;
+      fetchDashboard().then(([overview, habitData]) => {
+        if (active && revision === request) { setData(overview); setHabits(habitData); setError(""); }
+      }).catch(() => { if (active && revision === request) setError("工作台读取失败，请重新加载。"); });
+    };
+    load();
+    window.addEventListener("workbench:records-changed", load);
+    return () => { active = false; window.removeEventListener("workbench:records-changed", load); };
   }, []);
 
   async function refresh() {
@@ -110,12 +116,19 @@ export default function OverviewPage() {
   const dateLabel = new Intl.DateTimeFormat("zh-CN", { month: "long", day: "numeric", weekday: "long" }).format(new Date());
 
   return (
-    <div className="page-shell">
-      <PageHeader
-        title="总览"
-        description={remaining > 0 ? "今天还有 " + remaining + " 项任务待处理，先选一件开始。" : "今日待办已完成，可以安排日程或记录新的想法。"}
-        meta={<><span className="tnum">{dateLabel}</span>{data.streak > 0 && <span className="inline-flex items-center gap-1.5"><Flame size={13} className="text-accent" />连续复盘 {data.streak} 天</span>}</>}
-      />
+    <div className="page-shell overview-page">
+      <header className="overview-intro">
+        <div className="min-w-0">
+          <p className="overview-kicker">个人工作台</p>
+          <h1 className="overview-title">总览</h1>
+          <p className="overview-description">{remaining > 0 ? "今天还有 " + remaining + " 项任务待处理，先选一件开始。" : data.today.total ? "今日待办已完成，可以安排日程或记录新的想法。" : "先记下要做的事，安排好今天。"}</p>
+        </div>
+        <div className="overview-date">
+          <CalendarDays size={17} aria-hidden="true" />
+          <div><span>今天</span><time className="tnum" dateTime={todayStr()}>{dateLabel}</time></div>
+          {data.streak > 0 && <span className="overview-streak"><Flame size={13} aria-hidden="true" />连续复盘 {data.streak} 天</span>}
+        </div>
+      </header>
 
       {error && <PageError message={error} onRetry={retry} />}
 
@@ -137,10 +150,10 @@ export default function OverviewPage() {
         </Link>
       </div>
 
-      <div className="mt-6 grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-        <section className="card min-w-0 p-5 sm:p-6" aria-labelledby="overview-tasks">
+      <div className="overview-grid">
+        <section className="card overview-panel overview-tasks min-w-0 p-5 sm:p-6" aria-labelledby="overview-tasks">
           <div className="section-heading">
-            <h2 id="overview-tasks" className="section-title">今日待办</h2>
+            <div className="overview-section-label"><span className="overview-section-icon"><ListTodo size={17} aria-hidden="true" /></span><h2 id="overview-tasks" className="section-title">今日待办</h2></div>
             <Link href="/today" className="inline-flex items-center gap-1 text-xs text-muted hover:text-accent">查看全部<ArrowRight size={13} /></Link>
           </div>
           {todayTasks.length === 0 ? (
@@ -170,9 +183,9 @@ export default function OverviewPage() {
           </form>
         </section>
 
-        <section className="card min-w-0 p-5 sm:p-6" aria-labelledby="overview-events">
+        <section className="card overview-panel overview-events min-w-0 p-5 sm:p-6" aria-labelledby="overview-events">
           <div className="section-heading">
-            <h2 id="overview-events" className="section-title">今日安排</h2>
+            <div className="overview-section-label"><span className="overview-section-icon"><CalendarClock size={17} aria-hidden="true" /></span><h2 id="overview-events" className="section-title">今日安排</h2></div>
             <Link href="/calendar" className="text-xs text-muted hover:text-accent">查看日历</Link>
           </div>
           {data.todayEvents.length === 0 ? (
@@ -188,12 +201,10 @@ export default function OverviewPage() {
             </div>
           )}
         </section>
-      </div>
-
-      <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-        <section className="card min-w-0 p-5 sm:p-6" aria-labelledby="overview-habits">
+        <section className="card overview-panel overview-habits min-w-0 p-5 sm:p-6" aria-labelledby="overview-habits">
           <div className="section-heading">
-            <div className="flex items-center gap-2">
+            <div className="overview-section-label">
+              <span className="overview-section-icon"><Target size={17} aria-hidden="true" /></span>
               <h2 id="overview-habits" className="section-title">习惯打卡</h2>
               {!!habits?.habits.length && <span className="tnum text-xs text-muted">{doneHabits}/{habits.habits.length}</span>}
             </div>
@@ -218,9 +229,9 @@ export default function OverviewPage() {
           )}
         </section>
 
-        <section className="card min-w-0 p-5 sm:p-6" aria-labelledby="overview-inspiration">
+        <section className="card overview-panel overview-inspiration min-w-0 p-5 sm:p-6" aria-labelledby="overview-inspiration">
           <div className="section-heading">
-            <h2 id="overview-inspiration" className="section-title">最新灵感</h2>
+            <div className="overview-section-label"><span className="overview-section-icon"><Lightbulb size={17} aria-hidden="true" /></span><h2 id="overview-inspiration" className="section-title">最新灵感</h2></div>
             <Link href="/inspiration" className="text-xs text-muted hover:text-accent">查看全部</Link>
           </div>
           {data.inspirations.length === 0 ? (

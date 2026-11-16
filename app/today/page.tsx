@@ -1,10 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { api } from "@/lib/api";
 import type { Task } from "@/db/schema";
 import TaskItem from "@/components/task-item";
+import TaskEditor from "@/components/task-editor";
+import TaskUndoNotice from "@/components/task-undo-notice";
+import { TaskRepeatCompletionNotice } from "@/components/task-schedule-meta";
+import { useTaskResource } from "@/components/use-task-resource";
 import { EmptyState, PageError, PageHeader, PageLoading } from "@/components/page-header";
 import { isOverdue, todayStr } from "@/lib/dates";
 import { ArrowRight, CheckSquare, GripVertical, Plus } from "lucide-react";
@@ -30,11 +34,13 @@ function SortableTask({
   task,
   onToggle,
   onDelete,
+  onEdit,
   disabled,
 }: {
   task: Task;
   onToggle: (t: Task) => void;
   onDelete: (t: Task) => void;
+  onEdit: (t: Task) => void;
   disabled: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition } = useSortable({
@@ -48,6 +54,7 @@ function SortableTask({
         overdue={!!task.dueDate && isOverdue(task.dueDate)}
         onToggle={onToggle}
         onDelete={onDelete}
+        onEdit={onEdit}
         disabled={disabled}
         dragHandle={
           <button type="button" {...attributes} {...listeners} disabled={disabled}
@@ -62,37 +69,18 @@ function SortableTask({
 }
 
 export default function TodayPage() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+  const { data: tasks, setData: setTasks, loading, loaded, error, setError, refresh: load } = useTaskResource<Task[]>("/api/tasks?filter=today", [], "today", "今日任务读取失败，请重新加载。");
   const [input, setInput] = useState("");
   const [priority, setPriority] = useState<"high" | "medium" | "low">("medium");
-  const [loading, setLoading] = useState(true);
-  const [loaded, setLoaded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<Task | null>(null);
+  const [deleted, setDeleted] = useState<Task[]>([]);
+  const [updated, setUpdated] = useState<Task | null>(null);
+  const [completedRepeat, setCompletedRepeat] = useState<Task | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-
-  const load = useCallback(async () => {
-    try {
-      setTasks(await api<Task[]>("/api/tasks?filter=today"));
-      setLoaded(true);
-      setError(null);
-    } catch {
-      setError("今日任务读取失败，请重新加载。");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  useEffect(() => {
-    const controller = new AbortController();
-    api<Task[]>("/api/tasks?filter=today", { signal: controller.signal })
-      .then((rows) => { setTasks(rows); setLoaded(true); })
-      .catch(() => { if (!controller.signal.aborted) setError("今日任务读取失败，请重新加载。"); })
-      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
-    return () => controller.abort();
-  }, []);
 
   const runAction = async (action: () => Promise<unknown>, message: string) => {
     if (busy) return false;
@@ -101,6 +89,7 @@ export default function TodayPage() {
     try {
       await action();
       await load();
+      window.dispatchEvent(new CustomEvent("workbench:records-changed", { detail: { source: "today" } }));
       return true;
     } catch {
       setError(message);
@@ -122,14 +111,21 @@ export default function TodayPage() {
   };
 
   const toggle = async (t: Task) => {
-    await runAction(() => api(`/api/tasks/${t.id}`, {
+    const saved = await runAction(() => api(`/api/tasks/${t.id}`, {
       method: "PATCH",
       json: { status: t.status === "done" ? "todo" : "done" },
     }), "任务状态没有保存，请重试。");
+    if (saved) setCompletedRepeat(t.status === "done" ? null : t);
   };
 
   const remove = async (t: Task) => {
-    await runAction(() => api(`/api/tasks/${t.id}`, { method: "DELETE" }), "任务删除失败，请重试。");
+    const saved = await runAction(() => api(`/api/tasks/${t.id}`, { method: "DELETE" }), "任务删除失败，请重试。");
+    if (saved) setDeleted((items) => [t, ...items.filter((item) => item.id !== t.id)]);
+  };
+
+  const restore = async (t: Task) => {
+    const saved = await runAction(() => api(`/api/tasks/${t.id}`, { method: "PATCH", json: { action: "restore" } }), "任务恢复失败，请重试。");
+    if (saved) setDeleted((items) => items.filter((item) => item.id !== t.id));
   };
 
   const onDragEnd = async (e: DragEndEvent) => {
@@ -151,7 +147,7 @@ export default function TodayPage() {
   return (
     <div className="page-shell">
       <PageHeader title="今日待办" description="安排今天要做的事，拖动任务可调整先后顺序。"
-        actions={<Link href="/week" className="btn-ghost">查看本周 <ArrowRight size={14} /></Link>} />
+        actions={<><Link href="/tasks/deleted" className="btn-ghost">最近删除</Link><Link href="/week" className="btn-ghost">查看本周 <ArrowRight size={14} /></Link></>} />
 
       {!loading && tasks.length > 0 && <div className="mb-6 flex flex-wrap items-center gap-x-6 gap-y-2 border-y border-line py-4 text-sm text-muted tnum">
         <span><strong className="mr-1.5 text-lg font-semibold text-ink">{tasks.length - done}</strong>项待完成</span>
@@ -187,13 +183,16 @@ export default function TodayPage() {
       </form>
 
       {error && <div className="mb-5"><PageError message={error} onRetry={load} /></div>}
+      {updated && <p role="status" className="mb-5 break-words text-sm text-muted">任务已保存。<Link href={`/tasks/${updated.id}`} className="ml-2 text-accent hover:underline">查看“{updated.title}”</Link></p>}
+      <TaskUndoNotice tasks={deleted} busy={busy} onRestore={restore} />
+      <TaskRepeatCompletionNotice task={completedRepeat} />
       {loading ? <PageLoading rows={4} /> : loaded && <>
 
       <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
         <SortableContext items={tasks.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           <div className="space-y-2">
             {tasks.map((t) => (
-              <SortableTask key={t.id} task={t} onToggle={toggle} onDelete={remove} disabled={busy} />
+              <SortableTask key={t.id} task={t} onToggle={toggle} onDelete={remove} onEdit={setEditing} disabled={busy} />
             ))}
           </div>
         </SortableContext>
@@ -201,6 +200,7 @@ export default function TodayPage() {
 
       {tasks.length === 0 && !error && <EmptyState title="今天还没有任务" description="在上方添加第一条任务，已安排的未完成任务也会显示在这里。" icon={<CheckSquare size={22} />} />}
       </>}
+      {editing && <TaskEditor key={editing.id} task={editing} onClose={() => setEditing(null)} onSaved={(saved) => { setUpdated(saved); setEditing(null); }} />}
     </div>
   );
 }

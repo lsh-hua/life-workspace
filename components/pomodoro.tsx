@@ -1,16 +1,19 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import type { Task, Pomodoro } from "@/db/schema";
 import { findNextCourse, type CourseScheduleData } from "@/lib/course-schedule";
+import { recordId } from "@/lib/record-links";
+import { focusTaskUnavailable } from "@/lib/review-planning";
 import {
   clearPomodoroSession,
   readPomodoroSession,
   savePomodoroSession,
   type PomodoroSession,
 } from "@/lib/pomodoro-session";
-import { AlarmClock, Pause, Play, RotateCcw, Timer } from "lucide-react";
+import { AlarmClock, Check, Pause, Play, RotateCcw, Timer } from "lucide-react";
 
 const FOCUS_MIN = 25;
 
@@ -38,8 +41,77 @@ export default function Pomodoro({
   const [error, setError] = useState<string | null>(null);
   const [session, setSession] = useState<PomodoroSession | null>(null);
   const [saving, setSaving] = useState(false);
+  const [starting, setStarting] = useState(false);
+  const [taskActionBusy, setTaskActionBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [finished, setFinished] = useState<{ sessionId: string; taskId: number | null; done: boolean } | null>(null);
   const endAtRef = useRef<number>(0);
   const finishingSession = useRef<string | null>(null);
+  const sessionRef = useRef<PomodoroSession | null>(null);
+  const startingRef = useRef(false);
+  const router = useRouter();
+
+  const updateSession = useCallback((value: PomodoroSession | null) => {
+    sessionRef.current = value;
+    setSession(value);
+  }, []);
+
+  const beginFreshSession = useCallback((task: Task | null) => {
+    const next: PomodoroSession = {
+      version: 1, sessionId: crypto.randomUUID(), taskId: task?.id ?? null,
+      status: "running", secondsLeft: FOCUS_MIN * 60,
+      endsAt: Date.now() + FOCUS_MIN * 60_000, updatedAt: Date.now(),
+    };
+    endAtRef.current = next.endsAt!;
+    updateSession(next);
+    savePomodoroSession(next);
+    setTaskId(next.taskId);
+    setSelectedTask(task);
+    setSecondsLeft(next.secondsLeft);
+    setRunning(true);
+    setFinished(null);
+    setError(null);
+    setNotice(task ? `已开始专注：${task.title}` : "已开始新一轮专注。");
+  }, [updateSession]);
+
+  const requestTaskFocus = useCallback(async (id: number) => {
+    if (startingRef.current) { setNotice("正在核对专注任务，请稍候。"); return; }
+    if (sessionRef.current || readPomodoroSession()) {
+      setNotice("已有专注会话，请先完成、继续或重置当前会话；待保存记录请先重试保存。");
+      return;
+    }
+    startingRef.current = true;
+    setStarting(true);
+    setError(null);
+    try {
+      const task = await api<Task>(`/api/tasks/${id}`);
+      const unavailable = focusTaskUnavailable(task);
+      if (unavailable) { setError(unavailable); return; }
+      if (sessionRef.current || readPomodoroSession()) {
+        setNotice("已有专注会话，请先处理当前会话后再开始这条任务。");
+        return;
+      }
+      beginFreshSession(task);
+    } catch {
+      setError("任务读取失败，可能已不存在，请重新打开任务后重试。");
+    } finally {
+      startingRef.current = false;
+      setStarting(false);
+    }
+  }, [beginFreshSession]);
+
+  useEffect(() => {
+    const startTask = (event: Event) => {
+      if (collapsed) onExpand();
+      const raw = (event as CustomEvent<{ taskId?: unknown }>).detail?.taskId;
+      const id = typeof raw === "number" ? recordId(String(raw)) : null;
+      if (!id) { setError("专注任务编号无效，请重新选择任务。"); return; }
+      void requestTaskFocus(id);
+    };
+    window.addEventListener("workbench:start-focus", startTask);
+    return () => window.removeEventListener("workbench:start-focus", startTask);
+  }, [collapsed, onExpand, requestTaskFocus]);
 
   const loadCount = useCallback(async () => {
     try {
@@ -109,7 +181,8 @@ export default function Pomodoro({
     };
     refresh();
     window.addEventListener("focus", refresh);
-    return () => { active = false; window.removeEventListener("focus", refresh); };
+    window.addEventListener("workbench:records-changed", refresh);
+    return () => { active = false; window.removeEventListener("focus", refresh); window.removeEventListener("workbench:records-changed", refresh); };
   }, [collapsed]);
 
   const finish = useCallback(async (completed: PomodoroSession) => {
@@ -122,10 +195,13 @@ export default function Pomodoro({
         json: { taskId: completed.taskId, minutes: FOCUS_MIN, sessionId: completed.sessionId },
       });
       clearPomodoroSession();
-      setSession(null);
+      updateSession(null);
       setSecondsLeft(FOCUS_MIN * 60);
+      setFinished({ sessionId: completed.sessionId, taskId: completed.taskId, done: false });
       setError(null);
+      setNotice("本轮专注已记录，选择接下来要做的事。");
       loadCount();
+      window.dispatchEvent(new Event("workbench:records-changed"));
       if (typeof Notification !== "undefined") {
         if (Notification.permission === "granted") {
           new Notification("番茄钟完成", { body: "休息 5 分钟，喝口水。" });
@@ -139,9 +215,10 @@ export default function Pomodoro({
       setSaving(false);
       finishingSession.current = null;
     }
-  }, [loadCount]);
+  }, [loadCount, updateSession]);
 
   const completeSession = useCallback((current: PomodoroSession) => {
+    if (sessionRef.current?.sessionId !== current.sessionId) return;
     const pending: PomodoroSession = {
       ...current,
       status: "pending",
@@ -150,16 +227,16 @@ export default function Pomodoro({
       updatedAt: Date.now(),
     };
     savePomodoroSession(pending);
-    setSession(pending);
+    updateSession(pending);
     setSecondsLeft(0);
     setRunning(false);
-  }, []);
+  }, [updateSession]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       const saved = readPomodoroSession();
       if (!saved) return;
-      setSession(saved);
+      updateSession(saved);
       setTaskId(saved.taskId);
       if (saved.status === "running") {
         const seconds = Math.max(0, Math.ceil(((saved.endsAt ?? Date.now()) - Date.now()) / 1000));
@@ -174,7 +251,7 @@ export default function Pomodoro({
       setSecondsLeft(saved.secondsLeft);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [completeSession]);
+  }, [completeSession, updateSession]);
 
   useEffect(() => {
     if (session?.status !== "pending") return;
@@ -197,12 +274,16 @@ export default function Pomodoro({
   }, [completeSession, running, session]);
 
   const start = () => {
-    if (saving || session?.status === "pending" || secondsLeft <= 0) return;
+    const current = sessionRef.current;
+    if (startingRef.current || saving || current?.status === "pending" || current?.status === "running" || secondsLeft <= 0) return;
+    if (!current && readPomodoroSession()) { setNotice("正在恢复已有专注，请稍候再继续。"); return; }
     setError(null);
+    setNotice(null);
+    setFinished(null);
     const endsAt = Date.now() + secondsLeft * 1000;
     const nextSession: PomodoroSession = {
       version: 1,
-      sessionId: session?.sessionId ?? crypto.randomUUID(),
+      sessionId: current?.sessionId ?? crypto.randomUUID(),
       taskId,
       status: "running",
       secondsLeft,
@@ -210,7 +291,7 @@ export default function Pomodoro({
       updatedAt: Date.now(),
     };
     endAtRef.current = endsAt;
-    setSession(nextSession);
+    updateSession(nextSession);
     savePomodoroSession(nextSession);
     setRunning(true);
     if (typeof Notification !== "undefined" && Notification.permission === "default") {
@@ -227,17 +308,19 @@ export default function Pomodoro({
     }
     const paused: PomodoroSession = { ...session, status: "paused", secondsLeft: seconds, endsAt: null, updatedAt: Date.now() };
     savePomodoroSession(paused);
-    setSession(paused);
+    updateSession(paused);
     setSecondsLeft(seconds);
     setRunning(false);
   };
 
   const reset = () => {
-    if (saving) return;
+    if (saving || startingRef.current || sessionRef.current?.status === "pending") return;
     clearPomodoroSession();
-    setSession(null);
+    updateSession(null);
     setRunning(false);
     setSecondsLeft(FOCUS_MIN * 60);
+    setFinished(null);
+    setNotice(null);
   };
 
   const chooseTask = (nextTaskId: number | null) => {
@@ -245,8 +328,35 @@ export default function Pomodoro({
     if (session?.status !== "paused") return;
     const updated = { ...session, taskId: nextTaskId, updatedAt: Date.now() };
     savePomodoroSession(updated);
-    setSession(updated);
+    updateSession(updated);
   };
+
+  const finishTask = async () => {
+    if (!finished?.taskId || taskActionBusy) return;
+    setTaskActionBusy(true);
+    setError(null);
+    try {
+      const task = await api<Task>(`/api/tasks/${finished.taskId}`);
+      if (task.deletedAt) { setError("任务已在最近删除中，可恢复后再标记完成。"); return; }
+      if (task.status !== "done") await api(`/api/tasks/${task.id}`, { method: "PATCH", json: { status: "done" } });
+      setFinished((current) => current?.sessionId === finished.sessionId ? { ...current, done: true } : current);
+      setTasks((current) => current.filter((item) => item.id !== task.id));
+      setTaskId(null);
+      setSelectedTask(null);
+      setNotice("任务已标记完成。");
+      window.dispatchEvent(new Event("workbench:records-changed"));
+    } catch {
+      setError("任务完成状态未能保存，请重试；本轮专注记录已保留。");
+    } finally { setTaskActionBusy(false); }
+  };
+
+  const continueFocus = () => {
+    if (!finished || taskActionBusy || startingRef.current || sessionRef.current) return;
+    if (finished.taskId) { void requestTaskFocus(finished.taskId); return; }
+    beginFreshSession(null);
+  };
+
+  const taskOptions = selectedTask && !tasks.some((task) => task.id === selectedTask.id) ? [selectedTask, ...tasks] : tasks;
 
   const active = running || secondsLeft < FOCUS_MIN * 60;
   const overlapsNextCourse =
@@ -291,10 +401,10 @@ export default function Pomodoro({
         value={taskId ?? ""}
         onChange={(e) => chooseTask(e.target.value ? Number(e.target.value) : null)}
         className="input mb-2 text-xs"
-        disabled={running || saving || session?.status === "pending"}
+        disabled={running || saving || starting || taskActionBusy || session?.status === "pending"}
       >
         <option value="">不绑定任务</option>
-        {tasks.map((t) => (
+        {taskOptions.map((t) => (
           <option key={t.id} value={t.id}>
             {t.title}
           </option>
@@ -327,14 +437,21 @@ export default function Pomodoro({
             <RotateCcw size={12} /> {saving ? "正在保存…" : "重试保存"}
           </button>
         ) : (
-          <button type="button" onClick={start} disabled={saving} className="btn-primary flex-1 justify-center gap-1 text-xs">
-            <Play size={12} /> {active ? "继续" : "开始专注"}
+          <button type="button" onClick={start} disabled={saving || starting || taskActionBusy} className="btn-primary flex-1 justify-center gap-1 text-xs">
+            <Play size={12} /> {starting ? "正在核对任务…" : active ? "继续" : "开始专注"}
           </button>
         )}
-        <button type="button" onClick={reset} disabled={saving} className="btn-ghost px-2" title="重置" aria-label="重置番茄钟">
+        <button type="button" onClick={reset} disabled={saving || starting || taskActionBusy || session?.status === "pending"} className="btn-ghost px-2" title="重置" aria-label="重置番茄钟">
           <RotateCcw size={13} />
         </button>
       </div>
+      {finished && <div className="mt-3 space-y-2 border-t border-line pt-3" aria-label="专注完成后的操作">
+        <p className="text-[11px] leading-5 text-muted">本轮已保存，接下来：</p>
+        {finished.taskId && <button type="button" disabled={taskActionBusy || starting || finished.done} onClick={() => { void finishTask(); }} className="btn-ghost w-full justify-center text-xs"><Check size={12} />{finished.done ? "任务已完成" : "完成任务"}</button>}
+        <button type="button" disabled={taskActionBusy || starting || finished.done} onClick={continueFocus} className="btn-ghost w-full justify-center text-xs">继续专注一轮</button>
+        <button type="button" disabled={taskActionBusy || starting} onClick={() => router.push(finished.taskId ? `/review?focusTask=${finished.taskId}` : "/review")} className="btn-ghost w-full justify-center text-xs">记录阻碍</button>
+      </div>}
+      {notice && <p role="status" className="mt-2 text-[11px] leading-5 text-muted">{notice}</p>}
       {error && <p role="status" className="mt-2 text-[11px] leading-5 text-danger">{error}</p>}
     </section>
   );

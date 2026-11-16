@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { Suspense, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { Habit, HabitLog, Review, Task } from "@/db/schema";
 import { todayStr } from "@/lib/dates";
 import { reviewStreak } from "@/lib/day-rules";
+import { recordId, recordTarget, type RecordTarget } from "@/lib/record-links";
+import { appendFocusProblem } from "@/lib/review-planning";
+import ReviewPlanDialog from "@/components/review-plan-dialog";
+import UpcomingWeek from "@/components/upcoming-week";
+import ReviewFocusTask from "@/components/review-focus-task";
 import { EmptyState, PageError, PageHeader, PageLoading } from "@/components/page-header";
 import {
   createReviewAutosave, EMPTY_REVIEW, parseReviewDraft, sameReview,
@@ -24,6 +30,17 @@ const TABS = [
 type Tab = (typeof TABS)[number]["key"];
 
 export default function ReviewPage() {
+  return <Suspense fallback={<div className="page-shell"><PageLoading rows={4} /></div>}><ReviewRoute /></Suspense>;
+}
+
+function ReviewRoute() {
+  const params = useSearchParams();
+  const focusValues = params.getAll("focusTask");
+  const focusTaskId = focusValues.length === 1 ? recordId(focusValues[0]) : null;
+  return <ReviewContent key={params.toString()} target={recordTarget(params, "reviews")} focusTaskId={focusTaskId} invalidFocus={params.has("focusTask") && !focusTaskId} />;
+}
+
+function ReviewContent({ target, focusTaskId, invalidFocus }: { target: RecordTarget; focusTaskId: number | null; invalidFocus: boolean }) {
   const [tab, setTab] = useState<Tab>("day");
 
   return (
@@ -61,7 +78,7 @@ export default function ReviewPage() {
       } />
 
       <section role="tabpanel" id={`review-panel-${tab}`} aria-labelledby={`review-tab-${tab}`}>
-        {tab === "day" && <DayReview />}
+        {tab === "day" && <DayReview target={target} focusTaskId={focusTaskId} invalidFocus={invalidFocus} />}
         {tab === "week" && <PeriodReview period="week" />}
         {tab === "month" && <PeriodReview period="month" />}
       </section>
@@ -115,7 +132,7 @@ function getReviewSession(date: string, review: Review | null) {
   return session;
 }
 
-function DayReview() {
+function DayReview({ target, focusTaskId, invalidFocus }: { target: RecordTarget; focusTaskId: number | null; invalidFocus: boolean }) {
   const [today] = useState(todayStr);
   const [session, setSession] = useState<ReviewAutosave | null>(null);
   const [history, setHistory] = useState<Review[]>([]);
@@ -123,6 +140,10 @@ function DayReview() {
   const [notice, setNotice] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reload, setReload] = useState(0);
+  const [currentReviewId, setCurrentReviewId] = useState<number | null>(null);
+  const [planOpen, setPlanOpen] = useState(false);
+  const locatedHistory = useRef<HTMLElement>(null);
+  const currentHeading = useRef<HTMLDivElement>(null);
   const state = useSyncExternalStore(
     session?.subscribe ?? subscribeNothing,
     session?.snapshot ?? getLoadingSnapshot,
@@ -134,13 +155,14 @@ function DayReview() {
     let active = true;
     Promise.all([
       api<Review | null>(`/api/reviews?date=${today}`),
-      api<Review[]>("/api/reviews").catch(() => []),
+      api<Review[]>("/api/reviews").catch((error) => { if (target.requested) throw error; return []; }),
       api<Task[]>("/api/tasks?filter=today").catch(() => []),
     ])
       .then(([review, list, tasks]) => {
         if (!active) return;
         const loaded = getReviewSession(today, review);
         setSession(loaded.autosave);
+        setCurrentReviewId(review?.id ?? null);
         setNotice(loaded.notice);
         setHistory(list.filter((item) => item.date !== today));
         setDoneTasks(tasks.filter((task) => task.status === "done"));
@@ -150,7 +172,17 @@ function DayReview() {
         if (active) setLoadError("复盘读取失败，本机草稿会保留。请重新加载后继续编辑。");
       });
     return () => { active = false; };
-  }, [today, reload]);
+  }, [today, reload, target.requested]);
+
+  const historicalTarget = !target.invalid && target.date !== today
+    ? history.find((review) => review.date === target.date && (!target.id || review.id === target.id)) : undefined;
+  const currentTarget = !target.invalid && target.date === today && !!currentReviewId && (!target.id || target.id === currentReviewId);
+
+  useEffect(() => {
+    const element = historicalTarget ? locatedHistory.current : currentTarget ? currentHeading.current : null;
+    element?.focus({ preventScroll: true });
+    element?.scrollIntoView({ behavior: "auto", block: "start" });
+  }, [historicalTarget, currentTarget]);
 
   useEffect(() => {
     if (!session || state.status !== "pending" || state.conflict) return;
@@ -194,7 +226,10 @@ function DayReview() {
     placeholder: string
   ) => (
     <div className={`card p-5 ${key === "doneText" ? "md:col-span-2" : ""}`}>
-      <label htmlFor={`review-${key}`} className="mb-3 block text-sm font-medium">{label}</label>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <label htmlFor={`review-${key}`} className="block text-sm font-medium">{label}</label>
+        {key === "tomorrowText" && <button type="button" disabled={!form.tomorrowText.trim()} onClick={() => setPlanOpen(true)} className="btn-ghost text-xs">加入明日计划</button>}
+      </div>
       {key === "doneText" && doneTasks.length > 0 && (
         <div className="mb-2 flex flex-wrap gap-1.5">
           {doneTasks.map((t) => (
@@ -217,9 +252,33 @@ function DayReview() {
 
   return (
     <>
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-line pb-4">
+      {target.invalid && <p role="alert" className="mb-5 rounded-xl border border-line bg-surface p-4 text-sm text-muted">定位链接中的日期或记录编号无效，请重新搜索。</p>}
+      {session && target.requested && !target.invalid && !historicalTarget && !currentTarget && <p role="status" className="mb-5 rounded-xl border border-line bg-surface p-4 text-sm text-muted">未找到指定日期的这条复盘，记录可能已删除。下方仍可查看和填写今日复盘。</p>}
+      {historicalTarget && <section ref={locatedHistory} tabIndex={-1} aria-labelledby="located-review-title" className="card mb-8 scroll-mt-5 p-5 ring-2 ring-accent focus:outline-none">
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <h2 id="located-review-title" className="text-base font-semibold tnum">{historicalTarget.date} · 历史复盘</h2><span className="rounded-md bg-bg px-2 py-1 text-xs text-muted">只读记录</span>
+          {!!historicalTarget.mood && <span>{MOOD_LABEL[historicalTarget.mood]}</span>}
+        </div>
+        <div className="space-y-4 whitespace-pre-wrap break-words text-sm leading-7 text-muted">
+          <p><b className="text-ink">完成：</b>{historicalTarget.doneText || "未填写"}</p>
+          <p><b className="text-ink">问题：</b>{historicalTarget.problemText || "未填写"}</p>
+          <p><b className="text-ink">明日：</b>{historicalTarget.tomorrowText || "未填写"}</p>
+          <p><b className="text-ink">总结：</b>{historicalTarget.summary || "未填写"}</p>
+        </div>
+      </section>}
+      {invalidFocus && <p role="alert" className="mb-5 rounded-xl border border-line bg-surface p-4 text-sm text-muted">专注链接中的任务编号无效，请从任务详情重新打开。</p>}
+      {focusTaskId && <ReviewFocusTask taskId={focusTaskId} disabled={!session || !!loadError || state.conflict} onAppend={(title) => {
+        if (!session || loadError || state.conflict) return false;
+        const previous = session.snapshot().form.problemText;
+        const problemText = appendFocusProblem(previous, title);
+        if (problemText === previous) return false;
+        update({ problemText });
+        document.getElementById("review-problemText")?.focus();
+        return true;
+      }} />}
+      <div ref={currentHeading} tabIndex={-1} className={`mb-5 flex scroll-mt-5 flex-wrap items-center justify-between gap-3 border-b border-line pb-4 focus:outline-none ${currentTarget ? "rounded-xl p-3 ring-2 ring-accent" : ""}`}>
         <p className="text-sm text-muted tnum">
-          {today} ·{" "}
+          今日复盘 · {today} ·{" "}
           <span id="review-save-status" role="status" aria-live="polite" className={`inline-flex items-center gap-1 ${state.status === "error" ? "text-danger" : "text-muted"}`}>
             {state.status === "saved" && <CheckCircle2 size={13} />}{statusLabel}
           </span>
@@ -301,12 +360,13 @@ function DayReview() {
           />
         </div>
       </fieldset>
+      {planOpen && <ReviewPlanDialog reviewDate={today} text={form.tomorrowText} onClose={() => setPlanOpen(false)} />}
 
       {history.length > 0 && (
         <section className="mt-8">
           <h2 className="mb-4 text-sm font-semibold">历史复盘</h2>
           <div className="overflow-hidden rounded-xl border border-line bg-surface">
-            {history.slice(0, 14).map((r) => (
+            {history.filter((review) => review.id !== historicalTarget?.id).slice(0, 14).map((r) => (
               <details key={r.id} className="border-b border-line px-4 py-4 last:border-b-0 sm:px-5">
                 <summary className="flex min-h-7 cursor-pointer items-center gap-3 text-sm">
                   <span className="font-medium tnum">{r.date}</span>
@@ -345,6 +405,7 @@ type ReportData = {
 };
 
 const weekdayCn = (d: string) => "日一二三四五六"[getDay(parseISO(d))];
+const taskDay = (task: Task) => task.plannedDate ?? task.dueDate;
 
 function PeriodReview({ period }: { period: "week" | "month" }) {
   const [offset, setOffset] = useState(0);
@@ -375,7 +436,7 @@ function PeriodReview({ period }: { period: "week" | "month" }) {
     : [];
 
   const hasRecord = (d: string) =>
-    data!.tasks.some((t) => t.dueDate === d) ||
+    data!.tasks.some((t) => taskDay(t) === d) ||
     data!.reviews.some((r) => r.date === d) ||
     data!.habitLogs.some((l) => l.date === d);
 
@@ -397,7 +458,7 @@ function PeriodReview({ period }: { period: "week" | "month" }) {
       "## 每日完成情况",
     ];
     for (const d of shownDays) {
-      const done = data.tasks.filter((t) => t.dueDate === d && t.status === "done");
+      const done = data.tasks.filter((t) => taskDay(t) === d && t.status === "done");
       const review = data.reviews.find((r) => r.date === d);
       const checkins = data.habitLogs.filter((l) => l.date === d).length;
       lines.push(`\n### ${d} 周${weekdayCn(d)}`);
@@ -450,6 +511,7 @@ function PeriodReview({ period }: { period: "week" | "month" }) {
       </div>
       {copyError && <p role="alert" className="mb-4 text-sm text-danger">{copyError}</p>}
 
+      {data && period === "week" && <UpcomingWeek after={data.range.end} />}
       {!data ? error ? (
         <PageError message={error} onRetry={() => setReload((value) => value + 1)} />
       ) : (
@@ -492,8 +554,8 @@ function PeriodReview({ period }: { period: "week" | "month" }) {
           ) : (
             <div className="space-y-3">
               {shownDays.map((d) => {
-                const done = data.tasks.filter((t) => t.dueDate === d && t.status === "done");
-                const undone = data.tasks.filter((t) => t.dueDate === d && t.status !== "done");
+                const done = data.tasks.filter((t) => taskDay(t) === d && t.status === "done");
+                const undone = data.tasks.filter((t) => taskDay(t) === d && t.status !== "done");
                 const review = data.reviews.find((r) => r.date === d);
                 const checkins = data.habitLogs.filter((l) => l.date === d).length;
                 const empty = done.length === 0 && undone.length === 0 && !review && checkins === 0;

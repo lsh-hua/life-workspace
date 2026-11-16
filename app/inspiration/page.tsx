@@ -1,16 +1,24 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import type { Inspiration } from "@/db/schema";
 import { ArrowUpRight, Check, Lightbulb, Pin, PinOff, Trash2 } from "lucide-react";
 import { EmptyState, PageError, PageHeader, PageLoading } from "@/components/page-header";
+import { recordTarget } from "@/lib/record-links";
 
 function tagsOf(item: Inspiration) {
   return [...new Set(item.tags.split(",").map((tag) => tag.trim()).filter(Boolean))];
 }
 
 export default function InspirationPage() {
+  return <Suspense fallback={<div className="page-shell"><PageLoading rows={4} /></div>}><InspirationContent /></Suspense>;
+}
+
+function InspirationContent() {
+  const params = useSearchParams();
+  const target = recordTarget(params, "inspirations");
   const [items, setItems] = useState<Inspiration[] | null>(null);
   const [draft, setDraft] = useState("");
   const [tagDraft, setTagDraft] = useState("");
@@ -18,18 +26,39 @@ export default function InspirationPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const locatedItem = useRef<HTMLElement>(null);
+  const focusedTarget = useRef<number | null>(null);
+  const loadRevision = useRef(0);
 
-  const load = useCallback(async () => {
-    setItems(await api<Inspiration[]>("/api/inspirations"));
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const revision = ++loadRevision.current;
+    const data = await api<Inspiration[]>("/api/inspirations", { signal });
+    if (!signal?.aborted && revision === loadRevision.current) setItems(data);
   }, []);
 
   useEffect(() => {
+    const refresh = () => {
+      void load().then(() => setError("")).catch(() => setError("灵感读取失败，请重新加载。"));
+    };
+    window.addEventListener("workbench:records-changed", refresh);
+    return () => window.removeEventListener("workbench:records-changed", refresh);
+  }, [load]);
+
+  useEffect(() => {
+    if (!target.id || target.invalid) { focusedTarget.current = null; return; }
+    if (!items?.some((item) => item.id === target.id) || focusedTarget.current === target.id) return;
+    locatedItem.current?.focus({ preventScroll: true });
+    locatedItem.current?.scrollIntoView({ behavior: "auto", block: "center" });
+    focusedTarget.current = target.id;
+  }, [items, target.id, target.invalid]);
+
+  useEffect(() => {
     const controller = new AbortController();
-    api<Inspiration[]>("/api/inspirations", { signal: controller.signal }).then(setItems).catch(() => {
+    load(controller.signal).catch(() => {
       if (!controller.signal.aborted) setError("灵感读取失败，请重新加载。");
     });
     return () => controller.abort();
-  }, []);
+  }, [load]);
 
   const refresh = async () => {
     setError("");
@@ -72,7 +101,9 @@ export default function InspirationPage() {
   };
 
   const allTags = [...new Set((items ?? []).flatMap(tagsOf))];
-  const shown = filter ? (items ?? []).filter((item) => tagsOf(item).includes(filter)) : items ?? [];
+  const targetItem = !target.invalid && target.id ? items?.find((item) => item.id === target.id) : undefined;
+  const targetOutsideFilter = !!targetItem && !!filter && !tagsOf(targetItem).includes(filter);
+  const shown = filter ? (items ?? []).filter((item) => tagsOf(item).includes(filter) || item.id === targetItem?.id) : items ?? [];
 
   return (
     <div className="page-shell">
@@ -102,6 +133,9 @@ export default function InspirationPage() {
 
       {error && <div className="mb-5"><PageError message={error} onRetry={refresh} /></div>}
       {notice && <p role="status" className="mb-5 flex items-center gap-2 text-sm text-muted"><Check size={15} className="text-accent" />{notice}</p>}
+      {target.invalid && <p role="alert" className="mb-5 rounded-xl border border-line bg-surface p-4 text-sm text-muted">定位链接中的记录编号无效，请重新搜索。</p>}
+      {items && !target.invalid && target.id && !targetItem && <p role="status" className="mb-5 rounded-xl border border-line bg-surface p-4 text-sm text-muted">未找到这条灵感，记录可能已删除。可以重新搜索或查看其他记录。</p>}
+      {targetOutsideFilter && <p role="status" className="mb-5 text-sm text-muted">已同时展示搜索命中的灵感，方便在当前标签筛选下查看。</p>}
 
       {allTags.length > 0 && (
         <nav className="mb-5 flex flex-wrap gap-2" aria-label="按标签筛选灵感">
@@ -114,7 +148,7 @@ export default function InspirationPage() {
       {!items && !error ? <PageLoading rows={4} /> : shown.length > 0 ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {shown.map((item) => (
-            <article key={item.id} className={`card flex min-w-0 flex-col p-5 ${item.pinned ? "border-accent/35" : ""}`}>
+            <article key={item.id} ref={item.id === targetItem?.id ? locatedItem : null} tabIndex={item.id === targetItem?.id ? -1 : undefined} className={`card flex min-w-0 scroll-mt-5 flex-col p-5 focus:outline-none ${item.pinned ? "border-accent/35" : ""} ${item.id === targetItem?.id ? "ring-2 ring-accent" : ""}`}>
               {!!item.pinned && <p className="mb-3 inline-flex items-center gap-1.5 text-xs font-medium text-accent"><Pin size={12} />已置顶</p>}
               <p className="flex-1 break-words whitespace-pre-wrap text-sm leading-7">{item.content}</p>
               <div className="mt-5 flex flex-wrap gap-2">

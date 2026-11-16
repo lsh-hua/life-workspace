@@ -5,6 +5,7 @@ import { Archive, CheckCircle2, Download, ExternalLink, HardDrive, LoaderCircle,
 import { api } from "@/lib/api";
 import { EmptyState, PageError, PageHeader, PageLoading } from "@/components/page-header";
 import { APP_VERSION } from "@/lib/app-version";
+import QuickAddSettings from "@/components/quick-add-settings";
 
 type Backup = {
   name: string;
@@ -53,6 +54,8 @@ export default function SettingsPage() {
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateResult | null>(null);
   const [updateError, setUpdateError] = useState("");
+  const [restoreInfo, setRestoreInfo] = useState<{ supported: boolean; last: { retainedDirectory: string; restoredAt: string } | null } | null>(null);
+  const [restoringName, setRestoringName] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -63,6 +66,22 @@ export default function SettingsPage() {
       });
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    window.workbench?.backups?.getRestoreInfo().then(setRestoreInfo).catch(() => setNotice("暂时无法读取桌面恢复状态，仍可下载备份。"));
+  }, []);
+
+  async function restore(name: string) {
+    if (restoringName || !window.workbench?.backups) return;
+    setRestoringName(name);
+    setError("");
+    try {
+      const result = await window.workbench.backups.restore(name);
+      if (result.cancelled) setNotice("已取消恢复，当前数据保持原样。");
+      else if (result.error) setError("恢复未完成，请查看桌面提示并保留原数据目录。");
+    } catch { setError("恢复请求未完成，请检查应用和备份状态后重试。"); }
+    finally { setRestoringName(null); }
+  }
 
   async function refresh() {
     if (refreshing) return;
@@ -138,6 +157,15 @@ export default function SettingsPage() {
         </button>
       </section>
 
+      <QuickAddSettings />
+
+      {restoreInfo?.last && <section className="card mb-4 p-5" aria-labelledby="restore-history-title">
+        <h2 id="restore-history-title" className="text-sm font-semibold">上次恢复前的数据</h2>
+        <p className="mt-2 text-xs leading-6 text-muted">{new Date(restoreInfo.last.restoredAt).toLocaleString("zh-CN")} 恢复前的完整数据与备份已保留：</p>
+        <p className="mt-1 break-all font-mono text-xs">{restoreInfo.last.retainedDirectory}</p>
+        <button type="button" className="btn-ghost mt-3" onClick={() => { void window.workbench?.openPath(restoreInfo.last!.retainedDirectory); }}>打开保留目录</button>
+      </section>}
+
       <section className="card p-5 sm:p-6" aria-labelledby="backup-title" aria-busy={busy}>
         <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
           <div>
@@ -156,6 +184,10 @@ export default function SettingsPage() {
               <p>本机备份目录</p>
               <p className="break-all font-mono text-ink select-all">{data.directory}</p>
               <p className="mt-1">建议定期下载到其他磁盘，保留独立副本。</p>
+              {restoreInfo && <button type="button" className="mt-2 text-accent underline underline-offset-4" onClick={async () => {
+                try { const message = await window.workbench!.openPath(data.directory); if (message) setError("无法打开备份目录，请检查目录是否存在。"); }
+                catch { setError("无法打开备份目录，请检查目录是否存在。"); }
+              }}>打开备份目录</button>}
             </div>
           </div>
         )}
@@ -194,6 +226,7 @@ export default function SettingsPage() {
                 <a href={`/api/backups/${encodeURIComponent(item.name)}`} download className="btn-ghost shrink-0" aria-label={`下载${REASONS[item.reason]} ${new Date(item.createdAt).toLocaleString("zh-CN")}`}>
                   <Download size={14} /> 下载
                 </a>
+                {restoreInfo?.supported && <button type="button" disabled={!!restoringName || busy} onClick={() => { void restore(item.name); }} className="btn-ghost shrink-0" aria-label={`恢复${REASONS[item.reason]} ${new Date(item.createdAt).toLocaleString("zh-CN")}`}><RotateCcw size={14} />{restoringName === item.name ? "正在准备…" : "恢复"}</button>}
               </li>
             ))}
           </ul>
@@ -203,7 +236,8 @@ export default function SettingsPage() {
       </section>
 
       <details className="mt-6 rounded-xl border border-line p-4 text-xs leading-6 text-muted">
-        <summary className="cursor-pointer font-medium text-ink">如何恢复一份备份</summary>
+        <summary className="cursor-pointer font-medium text-ink">{restoreInfo?.supported ? "恢复前请了解" : "如何恢复一份备份"}</summary>
+        {restoreInfo?.supported && <p className="mt-3">桌面版可在备份记录中选择“恢复”；确认后应用会停止本地服务、保存当前快照，并保留整个旧数据目录。</p>}
         <ol className="mt-3 list-decimal space-y-2 pl-4">
           <li>先下载所需备份，然后完全退出人生工作台。</li>
           <li>将当前数据文件夹整体改名留存，例如加上“恢复前”的日期后缀。这样能一起保留旧数据库和日志文件。</li>

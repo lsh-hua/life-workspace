@@ -9,13 +9,21 @@ export const tasks = sqliteTable("tasks", {
   priority: text("priority", { enum: ["high", "medium", "low"] })
     .notNull()
     .default("medium"),
-  dueDate: text("due_date"), // YYYY-MM-DD，决定出现在今天/本周/日历
+  dueDate: text("due_date"), // 最后期限；旧记录的日期含义保持原样
+  plannedDate: text("planned_date"), // 计划工作的日期，与最后期限分别保存
   isToday: integer("is_today").notNull().default(0), // 手动加入"今日"
   sortOrder: integer("sort_order").notNull().default(0),
-  source: text("source").notNull().default("manual"), // manual | inspiration
+  source: text("source").notNull().default("manual"), // manual | inspiration | review
   createdAt: text("created_at").notNull(),
   completedAt: text("completed_at"),
-});
+  deletedAt: text("deleted_at"), // 软删除保留原任务及关联的专注记录
+  repeatRule: text("repeat_rule"), // 校验后的周期规则 JSON
+  repeatParentId: integer("repeat_parent_id"), // 前次任务编号，唯一约束保证完成重试不重复续期
+  originKey: text("origin_key"), // 复盘行动的来源键，保留删除状态并避免重复创建
+}, (table) => [
+  uniqueIndex("tasks_repeat_parent_unique").on(table.repeatParentId),
+  uniqueIndex("tasks_origin_key_unique").on(table.originKey),
+]);
 
 // 日程事件表（日历手动事件）
 export const events = sqliteTable("events", {

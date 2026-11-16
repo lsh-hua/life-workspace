@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, schema } from "@/db";
-import { asc, eq } from "drizzle-orm";
+import { asc } from "drizzle-orm";
 import { nowIso } from "@/lib/dates";
 
 export async function GET() {
