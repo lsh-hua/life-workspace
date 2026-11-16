@@ -142,6 +142,8 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 
 **1.6.0 风格更新构建（2026-11-16）**：安装包位于 `desktop-app/release/1.6.0-20261116T090826607Z-b10cb9/`，`人生工作台 Setup 1.6.0.exe` 为 108,057,058 字节，SHA-256：`7E51412127B5BA3904196100FDB7DCD464CEAC9ABF210FA77616EB9135B919D4`。生产构建、ESLint、TypeScript、68 项回归、11 项包内 API 和包内恢复测试通过；1 项符号链接用例因 Windows 账户权限跳过。预览使用独立数据库；项目数据库哈希保持不变。该构建沿用 1.6.0 版本号。
 
+**1.6.0 发布记录（2026-11-16）**：已发布 [GitHub Release v1.6.0](https://github.com/lsh-hua/life-workspace/releases/tag/v1.6.0)，上传上述安装包为 `Setup.1.6.0.exe`，并附 SHA-256 清单；GitHub 资产摘要与本地校验值一致。
+
 **发布产物清理（2026-10-26）**：1.5.0 验收后清理 1.2.1 至 1.4.1 的旧安装器、失败构建目录、旧 `win-unpacked`、打包 staging 与 Next 缓存；发布目录仅保留 1.5.0。源码、正在运行的桌面目录、用户数据和备份不在清理范围。
 
 **NSIS mmap 错误（2026-09-14 遇到）**：makensis 连续三次报 `Internal compiler error #12345: error creating mmap`，清理临时文件无效，疑与系统实时防护有关。绕过方案：改用 zip 目标 `npx.cmd electron-builder --win zip --prepackaged release/win-unpacked -c.directories.output=release`，产物为免安装便携包 `人生工作台-<版本>-win.zip`（解压即运行）。1.0.0 即以 zip 形式发布；日后机器环境变化后可重试 NSIS。
