@@ -89,5 +89,17 @@ jobs:
           $version = $tag.Substring(1)
           $installer = Join-Path $env:RELEASE_STAGING "Setup.$version.exe"
           $checksum = "$installer.sha256"
-          gh release create $tag $installer $checksum --repo $env:GITHUB_REPOSITORY --verify-tag --generate-notes
-          if ($LASTEXITCODE -ne 0) { throw "上传 Release 资产失败。" }
+          $existing = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,assets 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $existing | ConvertFrom-Json
+            if ($release.isDraft) { throw "已有同标签草稿，请先完成或取消草稿。" }
+            foreach ($required in @("Setup.$version.exe", "Setup.$version.exe.sha256")) {
+              if (-not ($release.assets | Where-Object { $_.name -eq $required -and $_.size -gt 0 })) {
+                throw "已有 Release 缺少资产 $required。"
+              }
+            }
+            Write-Host "已有完整 Release，保留现有资产。"
+          } else {
+            gh release create $tag $installer $checksum --repo $env:GITHUB_REPOSITORY --verify-tag --generate-notes
+            if ($LASTEXITCODE -ne 0) { throw "上传 Release 资产失败。" }
+          }

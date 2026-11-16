@@ -138,9 +138,9 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 
 **1.5.0 构建与发布记录（2026-10-26）**：安装包位于 `desktop-app/release/1.5.0-20261026T115139721Z-1b9acd/`，`人生工作台 Setup 1.5.0.exe` 为 107,957,373 字节。SHA-256：`F6977FE925B0CE4298298464DDF85D86CB7AD11E5905BC2FA501610322D164EB`。已发布 [GitHub Release v1.5.0](https://github.com/lsh-hua/life-workspace/releases/tag/v1.5.0)，资产 `Setup.1.5.0.exe` 的大小与 SHA-256 均经核对。生产构建、TypeScript、目标 ESLint 与主进程语法检查通过；程序和托盘图标资源已随包；真实项目数据库 SHA-256 仍为 `A5E7389BDC504B259A08DB14970BBE3E5C96DA15E203B3D9B9D3A608B1434C2B`。
 
-**1.6.0 构建记录（2026-10-28）**：安装包位于 `desktop-app/release/1.6.0-20261028T072422797Z-1c35fe/`，`人生工作台 Setup 1.6.0.exe` 为 108,055,374 字节，SHA-256：`252C3C07BC4AC5707F5720BB59EE1A0616FE72912BFE5837100D60610E7598A8`。生产构建、全仓库 ESLint、TypeScript、68 项回归和 11 项包内 API 集成通过；1 项符号链接用例因 Windows 账户权限跳过。包内 Electron 运行时恢复测试通过；另在隔离的打包副本中自动确认恢复，验证原目录保留、服务重启及恢复后记录。真实项目数据库 SHA-256 保持不变。该版本尚未发布至 GitHub。
+**1.6.0 构建记录（2026-10-28）**：安装包位于 `desktop-app/release/1.6.0-20261028T072422797Z-1c35fe/`，`人生工作台 Setup 1.6.0.exe` 为 108,055,374 字节，SHA-256：`252C3C07BC4AC5707F5720BB59EE1A0616FE72912BFE5837100D60610E7598A8`。生产构建、全仓库 ESLint、TypeScript、68 项回归和 11 项包内 API 集成通过；1 项符号链接用例因 Windows 账户权限跳过。包内 Electron 运行时恢复测试通过；另在隔离的打包副本中自动确认恢复，验证原目录保留、服务重启及恢复后记录。真实项目数据库 SHA-256 保持不变。
 
-**1.6.0 风格更新构建（2026-11-16）**：安装包位于 `desktop-app/release/1.6.0-20261116T090826607Z-b10cb9/`，`人生工作台 Setup 1.6.0.exe` 为 108,057,058 字节，SHA-256：`7E51412127B5BA3904196100FDB7DCD464CEAC9ABF210FA77616EB9135B919D4`。生产构建、ESLint、TypeScript、68 项回归、11 项包内 API 和包内恢复测试通过；1 项符号链接用例因 Windows 账户权限跳过。预览使用独立数据库；项目数据库哈希保持不变。该构建沿用 1.6.0 版本号，未发布至 GitHub。
+**1.6.0 风格更新构建（2026-11-16）**：安装包位于 `desktop-app/release/1.6.0-20261116T090826607Z-b10cb9/`，`人生工作台 Setup 1.6.0.exe` 为 108,057,058 字节，SHA-256：`7E51412127B5BA3904196100FDB7DCD464CEAC9ABF210FA77616EB9135B919D4`。生产构建、ESLint、TypeScript、68 项回归、11 项包内 API 和包内恢复测试通过；1 项符号链接用例因 Windows 账户权限跳过。预览使用独立数据库；项目数据库哈希保持不变。该构建沿用 1.6.0 版本号。
 
 **发布产物清理（2026-10-26）**：1.5.0 验收后清理 1.2.1 至 1.4.1 的旧安装器、失败构建目录、旧 `win-unpacked`、打包 staging 与 Next 缓存；发布目录仅保留 1.5.0。源码、正在运行的桌面目录、用户数据和备份不在清理范围。
 
@@ -238,7 +238,7 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 1. 自动下载安装更新：评估代码签名、用户确认、失败回退与手动下载并存后再实施。
 2. 应用运行状态与窗口体验的进一步收敛。
 
-版本标签 `v*` 可触发 `.github/workflows/release.yml`：Windows CI 校验两处版本号和变更日志，运行回归、类型检查、生产打包及包内 API 验收，随后创建 GitHub Release 并上传安装器与 SHA-256 清单。该流程需要仓库 Actions 的 `contents: write` 权限；不会自动推送标签或触碰开发机用户数据库。
+版本标签 `v*` 可触发 `.github/workflows/release.yml`：Windows CI 校验两处版本号和变更日志，运行回归、类型检查、生产打包及包内 API 验收；发行版不存在时上传安装器与 SHA-256 清单，已有完整发行版时保留现有资产。该流程需要仓库 Actions 的 `contents: write` 权限；不会自动推送标签或触碰开发机用户数据库。
 
 全仓库 ESLint 与 TypeScript 检查作为发布前验证的一部分。
 

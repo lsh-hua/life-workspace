@@ -68,7 +68,7 @@ USABILITY_RESEARCH.md 使用流程调研：现状证据、官方资料与候选�
 - `tests/task-repeat.test.mjs`、`tests/review-planning.test.mjs`：周期日期与复盘行动的纯逻辑回归。
 - `tests/restore-backup.test.mjs`、`tests/desktop-restore.integration.mjs`：临时库恢复、失败回退、中断及打包运行时验收。
 - `scripts/build-desktop.mjs`：组装桌面发布包，排除顶层数据、构建及发布目录，并检测任何数据库文件。
-- `.github/workflows/release.yml`：版本标签触发 Windows 发布；验证版本一致性、回归、类型、构建与包内 API 后上传安装器及 SHA-256 清单。
+- `.github/workflows/release.yml`：版本标签触发 Windows 验证与发布；已有完整发行版时保留资产，否则上传安装器和 SHA-256 清单。
 - `PROJECT.md`：环境、功能、数据与发布交接入口。
 - `CHANGELOG.md`：面向版本的行为变化记录。
 - `USABILITY_RESEARCH.md`：优化录入、搜索、误操作恢复或任务安排前查阅；区分已核对现状与待实现建议。
