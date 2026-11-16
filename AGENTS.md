@@ -68,7 +68,7 @@ USABILITY_RESEARCH.md 使用流程调研：现状证据、官方资料与候选�
 - `tests/task-repeat.test.mjs`、`tests/review-planning.test.mjs`：周期日期与复盘行动的纯逻辑回归。
 - `tests/restore-backup.test.mjs`、`tests/desktop-restore.integration.mjs`：临时库恢复、失败回退、中断及打包运行时验收。
 - `scripts/build-desktop.mjs`：组装桌面发布包，排除顶层数据、构建及发布目录，并检测任何数据库文件。
-- `.github/workflows/release.yml`：版本标签触发 Windows 验证与发布；已有完整发行版时保留资产，否则上传安装器和 SHA-256 清单。
+- `.github/workflows/release.yml`：版本标签触发 Windows 验证与发布，手动触发只验证；已有完整发行版时保留资产。
 - `PROJECT.md`：环境、功能、数据与发布交接入口。
 - `CHANGELOG.md`：面向版本的行为变化记录。
 - `USABILITY_RESEARCH.md`：优化录入、搜索、误操作恢复或任务安排前查阅；区分已核对现状与待实现建议。
@@ -91,6 +91,7 @@ Electron   -> Next standalone       -> SQLite 用户目录
 - 测试使用系统临时目录中的独立数据库；不得调用 `scripts/seed.mjs`，不得写入 `data/workbench.db`。
 - API 集成测试先完成生产构建，再运行 `npm.cmd run test:integration`；脚本自行启动与关闭临时库服务。
 - 发布前用 `WORKBENCH_PACKAGED_APP` 指向新包的 win-unpacked 再跑集成测试；数据目录过滤只能匹配顶层 data，备份路由代码必须保留。
+- 干净环境先运行 `npx.cmd next typegen`，再运行独立 TypeScript 检查。
 - 包内恢复验收运行 `npm.cmd run test:restore:packaged`，只操作系统临时库，不启动真实用户数据目录。
 - 新迁移必须可增量执行；执行迁移前先确认数据库路径并备份真实数据。
 - 桌面构建产物中不得出现 `.db`、`.sqlite` 或 `.sqlite3`；用户数据只能位于运行时 `userData` 目录。

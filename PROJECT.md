@@ -51,6 +51,7 @@ Electron 相关命令还需追加：`/c/Windows/System32:/c/Windows/System32/Win
 ```bash
 npm.cmd run dev            # 开发服务器（scripts/dev.mjs 包装器，会把 --host 转成 --hostname）
 npx.cmd next build --webpack   # 生产构建。必须用 --webpack，见 §7
+npx.cmd next typegen       # 干净环境先生成路由类型，再独立运行 TypeScript 检查
 npm.cmd run db:generate    # 根据 db/schema.ts 生成迁移 SQL
 npm.cmd run db:migrate     # 应用迁移（scripts/migrate.mjs）
 npm.cmd run dist           # 桌面版打包（见 §6，有坑）
@@ -240,7 +241,7 @@ npx.cmd electron-builder --win nsis --prepackaged release/win-unpacked --config.
 1. 自动下载安装更新：评估代码签名、用户确认、失败回退与手动下载并存后再实施。
 2. 应用运行状态与窗口体验的进一步收敛。
 
-版本标签 `v*` 可触发 `.github/workflows/release.yml`：Windows CI 校验两处版本号和变更日志，运行回归、类型检查、生产打包及包内 API 验收；发行版不存在时上传安装器与 SHA-256 清单，已有完整发行版时保留现有资产。该流程需要仓库 Actions 的 `contents: write` 权限；不会自动推送标签或触碰开发机用户数据库。
+版本标签 `v*` 可触发 `.github/workflows/release.yml`：Windows CI 校验两处版本号和变更日志，运行回归、类型检查、生产打包及包内 API 验收；发行版不存在时上传安装器与 SHA-256 清单，已有完整发行版时保留现有资产。也可手动触发完整验证，手动运行不发布资产。该流程需要仓库 Actions 的 `contents: write` 权限；不会自动推送标签或触碰开发机用户数据库。
 
 全仓库 ESLint 与 TypeScript 检查作为发布前验证的一部分。
 

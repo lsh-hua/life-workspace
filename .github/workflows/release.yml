@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,9 +25,9 @@ jobs:
       - name: 校验标签与发布版本
         shell: pwsh
         run: |
-          $tagVersion = $env:GITHUB_REF_NAME.Substring(1)
           $rootVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
           $desktopVersion = (Get-Content desktop-app/package.json -Raw | ConvertFrom-Json).version
+          $tagVersion = if ($env:GITHUB_REF.StartsWith('refs/tags/')) { $env:GITHUB_REF_NAME.Substring(1) } else { $rootVersion }
           if ($rootVersion -ne $desktopVersion -or $rootVersion -ne $tagVersion) {
             throw "标签、根 package.json 与桌面 package.json 版本必须一致。"
           }
@@ -44,7 +45,12 @@ jobs:
         run: npm run lint
 
       - name: 检查 TypeScript
-        run: npx tsc --noEmit --incremental false
+        shell: pwsh
+        run: |
+          npx next typegen
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npx tsc --noEmit --incremental false
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: 构建 Windows 安装包
         run: npm run dist
@@ -81,6 +87,7 @@ jobs:
           "RELEASE_STAGING=$staging" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: 创建 GitHub Release 并上传资产
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
