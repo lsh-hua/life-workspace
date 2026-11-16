@@ -74,6 +74,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: 准备校验和清单
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           $version = $env:GITHUB_REF_NAME.Substring(1)
